@@ -300,10 +300,26 @@ color:#cdd6e4;box-shadow:0 6px 20px rgba(0,0,0,.5);white-space:normal;font-weigh
 .spot-st{color:var(--gold);font-size:14px;font-weight:600;margin:5px 0}
 .spot-kv{font-size:13px;color:#c3cee0;margin:4px 0}
 .spot-rz{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.5}
-.news{background:var(--panel);border-radius:8px;padding:6px 16px;margin:1em 0}
-.news h3{font-size:15px;color:#8fbaff;margin:.7em 0 .2em;border:0;padding:0}
-.news ul{margin:.2em 0;padding-left:1.2em}.news li{font-size:13.5px;margin:.2em 0}
-.news p{font-size:13.5px;margin:.3em 0}.news .q{color:var(--muted);font-size:12.5px}
+/* 作战方案表格增强 */
+.ap-sub{margin:12px 0 2px;font-size:14px;font-weight:700;color:#f0cd6a}
+.ap-note{font-size:11.5px;color:var(--muted);line-height:1.6;margin-bottom:5px}
+.ap-note b{color:#c3cee0}
+td.gold{color:var(--gold);font-weight:600}
+/* 消息面:卡片化,与上下 block 视觉统一 */
+.news{margin:1em 0;display:flex;flex-direction:column;gap:10px}
+.news h3{display:none}
+.nwcard{background:var(--panel);border-left:3px solid #4c8dff;border-radius:8px;padding:10px 15px;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.nwcard.bull{border-left-color:var(--up)}.nwcard.bear{border-left-color:var(--down)}.nwcard.macro{border-left-color:var(--gold)}
+.nwcard.risk{border-left-color:#ff8a3d;background:#241a15}
+.nw-hd{font-size:15px;font-weight:700;color:#e6edfb;margin-bottom:6px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.nw-row{font-size:13px;margin:4px 0;line-height:1.65;color:#c3cee0}
+.nw-lbl{display:inline-block;min-width:4.6em;color:#8fbaff;font-weight:600}
+.nw-lbl.cat{color:#f0b429}.nw-lbl.nat{color:#a0e0ff}.nw-lbl.cross{color:#8ce0c0}
+.nw-p{font-size:13px;margin:4px 0;line-height:1.65;color:#c3cee0}
+.stkchip{display:inline-block;background:#1f3050;color:#8fbaff;border:1px solid #345;border-radius:4px;
+  padding:0 6px;margin:0 3px 2px 0;font-size:12.5px;font-weight:600;white-space:nowrap}
+.stkchip.star{background:#3a2f14;color:#f0cd6a;border-color:#6b5620}
+.news b{color:#e6edfb}
 .foot{margin-top:2em;color:var(--muted);font-size:12.5px;text-align:center}
 .nochart{color:#ff8a8a;font-size:13px;padding:12px}
 @media(max-width:720px){.kwrap,.chipchart{flex:1 1 100%}.stat{flex:1 1 22%}}
@@ -533,39 +549,75 @@ document.addEventListener('DOMContentLoaded',function(){
    [].forEach.call(document.querySelectorAll('.tab'),function(x){x.classList.remove('on');});this.classList.add('on');render();};});
  window.addEventListener('resize',function(){kc.resize();cc.resize();fc.resize();});
  render();
+ // 静态区(消息面 + 作战方案/大盘/情绪卡)也做术语高亮;#judge 是动态区已在 render 内 glossify,跳过
+ ['.news','.action'].forEach(function(sel){[].forEach.call(document.querySelectorAll(sel),function(el){
+   if(el.closest('#judge'))return; el.innerHTML=glossify(el.innerHTML);});});
 });
 """
 
 
 def _news_html(md: str) -> str:
-    """把消息面 Markdown 轻量转 HTML(标题/列表/加粗/引用),嵌入统一报告。"""
+    """消息面 Markdown → 卡片化 HTML:每个板块/主题一张卡(左侧色条),受益个股高亮成 chip,
+    催化剂/性质/交叉结论 带标签,涨跌红绿,加粗高亮,风险提示单独橙色卡 —— 与上下 block 视觉统一。"""
+    import re
     import html as _h
-    out, in_ul = [], False
+
+    def fmt(t: str) -> str:
+        t = _h.escape(t)
+        t = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t)
+        # markdown 链接 [text](url) → 去链接保留文字(报告内不外跳)
+        t = re.sub(r"\[([^\]]+)\]\((?:https?|ftp)[^)]+\)", r"\1", t)
+        t = re.sub(r"([+＋]\d+(?:\.\d+)?%)", r"<span class='up'>\1</span>", t)
+        t = re.sub(r"(?<![\w>])(-\d+(?:\.\d+)?%)", r"<span class='down'>\1</span>", t)
+        # 个股 名称(6位代码) → chip;紧跟 ★ 的标为荐股池(金色)
+        t = re.sub(r"([一-龥A-Za-z0-9·\-]{2,10})\((\d{5,6})\)(★?)",
+                   lambda m: f"<span class='stkchip{' star' if m.group(3) else ''}'>"
+                             f"{m.group(1)}({m.group(2)}){m.group(3)}</span>", t)
+        return t
+
+    cards, cur = [], None
     for ln in md.splitlines():
         s = ln.rstrip()
         if not s.strip():
             continue
-        def inline(t):
-            import re
-            return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", _h.escape(t))
         if s.startswith("### "):
-            if in_ul:
-                out.append("</ul>"); in_ul = False
-            out.append(f"<h3>{inline(s[4:])}</h3>")
-        elif s.lstrip().startswith("- "):
-            if not in_ul:
-                out.append("<ul>"); in_ul = True
-            out.append(f"<li>{inline(s.lstrip()[2:])}</li>")
-        elif s.startswith(">"):
-            if in_ul:
-                out.append("</ul>"); in_ul = False
-            out.append(f"<p class='q'>{inline(s.lstrip('> ').rstrip())}</p>")
+            title = s[4:]
+            typ = ("risk" if "风险" in title else "macro"
+                   if re.search(r"大盘|政策|宏观", title) else "topic")
+            icon = {"risk": "⚠️", "macro": "🏛️", "topic": "🔥"}[typ]
+            cur = {"title": title, "typ": typ, "icon": icon, "rows": []}
+            cards.append(cur)
         else:
-            if in_ul:
-                out.append("</ul>"); in_ul = False
-            out.append(f"<p>{inline(s)}</p>")
-    if in_ul:
-        out.append("</ul>")
+            if cur is None:
+                cur = {"title": "消息面", "typ": "topic", "icon": "🔥", "rows": []}
+                cards.append(cur)
+            if s.lstrip().startswith("- "):
+                cur["rows"].append(("li", s.lstrip()[2:]))
+            elif s.startswith(">"):
+                cur["rows"].append(("q", s.lstrip("> ").rstrip()))
+            else:
+                cur["rows"].append(("p", s))
+
+    out = []
+    for c in cards:
+        rows = []
+        for kind, content in c["rows"]:
+            if kind == "q":
+                rows.append(f"<div class='nw-p' style='color:#7a869c;font-size:12px'>{fmt(content)}</div>")
+                continue
+            if kind == "p":
+                rows.append(f"<div class='nw-p'>{fmt(content)}</div>")
+                continue
+            m = re.match(r"\*\*(.+?)\*\*[::](.*)", content)
+            if m:
+                label, rest = m.group(1), m.group(2)
+                lc = ("cat" if "催化" in label else "nat" if "性质" in label
+                      else "cross" if ("结论" in label or "交叉" in label) else "")
+                rows.append(f"<div class='nw-row'><span class='nw-lbl {lc}'>{_h.escape(label)}</span>{fmt(rest)}</div>")
+            else:
+                rows.append(f"<div class='nw-row'>• {fmt(content)}</div>")
+        out.append(f"<div class='nwcard {c['typ']}'><div class='nw-hd'>{c['icon']} {fmt(c['title'])}</div>"
+                   f"{''.join(rows)}</div>")
     return "<div class='news'>" + "".join(out) + "</div>"
 
 
@@ -585,24 +637,47 @@ def _action_plan_html(ap: dict) -> str:
     if extra:
         h.append(f"<div class='act-sec con'>{' · '.join(extra)}</div>")
 
-    def _tbl(title, rows, headers, keys):
+    def _tbl(title, rows, headers, keys, cls_map=None, note=None):
         if not rows:
             return ""
         th = "".join(f"<th>{x}</th>" for x in headers)
         trs = []
         for r in rows:
-            tds = "".join(f"<td>{r.get(k, '') if r.get(k) is not None else '—'}</td>" for k in keys)
-            trs.append(f"<tr>{tds}</tr>")
-        return (f"<div style='margin-top:8px'><b>{title}</b></div>"
+            tds = []
+            for k in keys:
+                v = r.get(k)
+                cls = (cls_map or {}).get(k, "")
+                if callable(cls):
+                    cls = cls(r)
+                tds.append(f"<td class='{cls}'>{v if v is not None and v != '' else '—'}</td>")
+            trs.append(f"<tr>{''.join(tds)}</tr>")
+        cap = f"<div class='ap-note'>{note}</div>" if note else ""
+        return (f"<div class='ap-sub'>{title}</div>{cap}"
                 f"<table><thead><tr>{th}</tr></thead><tbody>{''.join(trs)}</tbody></table>")
 
-    h.append(_tbl("持仓端",
-                  [{**x, "cp": f"{x.get('cost')}/{x.get('price')}"} for x in ap.get("holdings", [])],
-                  ["股票", "成本/现价", "盈亏%", "动作", "触发价", "幅度", "依据"],
-                  ["name", "cp", "pnl_pct", "action", "trigger", "ratio", "note"]))
-    h.append(_tbl("荐股端", ap.get("pool", []),
-                  ["股票", "池", "动作", "计划价", "止损", "目标", "盈亏比", "依据"],
-                  ["name", "pool", "action", "plan_price", "stop", "target", "rr", "note"]))
+    # 持仓端:成本感知,列更实用(市值/距触发价%/止损/建议比例)
+    hrows = []
+    for x in ap.get("holdings", []):
+        trig, dist = x.get("trigger"), x.get("dist_to_trigger")
+        hrows.append({**x, "cp": f"{x.get('cost')}/{x.get('price')}",
+                      "mkt": (f"{round(x['mktval'])}" if x.get("mktval") else "—"),
+                      "trig_disp": (f"{trig} ({dist:+}%)" if trig and dist is not None else (trig or "—")),
+                      "ratio_disp": (x.get("ratio") if x.get("ratio") not in (None, "—") else "—")})
+    h.append(_tbl(
+        "持仓端(结合成本的加/减/守)", hrows,
+        ["股票", "成本/现价", "盈亏%", "市值", "动作", "触发价(距现价)", "止损", "建议比例", "依据"],
+        ["name", "cp", "pnl_pct", "mkt", "action", "trig_disp", "stop", "ratio_disp", "note"],
+        cls_map={"pnl_pct": lambda r: "up" if (r.get("pnl_pct") or 0) >= 0 else "down",
+                 "action": "gold"},
+        note=("<b>触发价</b>=到该价位就执行动作(减/加/清),括号是现价到触发价的距离;"
+              "<b>止损</b>=结构化止损线,跌破离场;<b>建议比例</b>=该动作占该股持仓的仓位比例"
+              "(如 1/3=减/加三分之一,≤1/3=最多加三分之一,100%=清空,—=持有不动)。")))
+    h.append(_tbl(
+        "荐股端(新标的建/低吸/突破)", ap.get("pool", []),
+        ["股票", "池", "动作", "计划价", "止损", "目标", "盈亏比", "依据"],
+        ["name", "pool", "action", "plan_price", "stop", "target", "rr", "note"],
+        cls_map={"action": "gold", "rr": lambda r: "up" if (r.get("rr") or 0) >= 1.5 else ("down" if (r.get("rr") or 0) < 1 else "")},
+        note="<b>计划价</b>=挂单参考价(回踩介入/突破确认);<b>盈亏比</b>=(目标−现价)/(现价−止损),≥1.5 值博、<1 不值博。"))
     if ap.get("swaps"):
         h.append("<div class='act-sec'>🔁 换股:" + ";".join(s["note"] for s in ap["swaps"]) + "</div>")
     h.append("<div class='act-dis'>动作由代码据 judge 计划价位合成;仅供研究,请自行复核,不构成投资建议、不代下单。</div></div>")
@@ -696,7 +771,8 @@ def render(data, global_data=None, news_md=None, action_plan=None):
     # 合并热点池 + 全局池,打标签(pool)供下拉区分
     picks = []
     for p in data.get("picks", []):
-        p.setdefault("pool", "热点池")
+        if not p.get("pool"):        # 空串也要兜底(build_sidecar 写了 pool="");概念池已带"概念"
+            p["pool"] = "热点池"
         picks.append(p)
     if global_data:
         for p in global_data.get("picks", []):

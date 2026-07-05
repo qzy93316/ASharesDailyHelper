@@ -145,10 +145,14 @@ def build_action_plan(date: str, focus: str | None = None) -> dict:
             if not _match_focus(p, focus if focus not in ("持仓", "荐股") else None):
                 continue
             act = _holding_action(p)
+            price = (p.get("indicators") or {}).get("close")
+            trig = act.get("trigger")
+            dist = round((trig / price - 1) * 100, 1) if (trig and price) else None  # 现价到触发价%
             holdings.append({"code": p["code"], "name": p["name"], "cost": p.get("cost"),
-                             "price": (p.get("indicators") or {}).get("close"),
+                             "price": price, "mktval": p.get("mktval"),
                              "pnl_pct": p.get("pnl_pct"), "tag": p.get("holding_tag"),
-                             "signal": p.get("signal"), **act})
+                             "signal": p.get("signal"), "dist_to_trigger": dist,
+                             "emotion": ((p.get("stock_emotion") or {}).get("grade")), **act})
     if scope_pool:
         seen = {h["code"] for h in holdings}
         for src in (daily, glob):
@@ -208,11 +212,16 @@ def render_md(ap: dict) -> str:
         L.append(f"- ⚠️ {ap['posture']['concentration_warn']}")
     if ap["holdings"]:
         L += ["", "## 持仓端动作", "",
-              "| 股票 | 成本/现价 | 盈亏% | 动作 | 触发价 | 幅度 | 依据 |",
-              "|---|---|---|---|---|---|---|"]
+              "> 触发价=到价执行动作(括号为现价到触发价距离);止损=结构止损线;"
+              "建议比例=该动作占该股持仓的仓位比例(1/3=减/加三分之一,100%=清空,—=持有不动)。", "",
+              "| 股票 | 成本/现价 | 盈亏% | 市值 | 动作 | 触发价(距现价) | 止损 | 建议比例 | 依据 |",
+              "|---|---|---|---|---|---|---|---|---|"]
         for h in ap["holdings"]:
+            trig, dist = h.get("trigger"), h.get("dist_to_trigger")
+            trig_disp = f"{trig}({dist:+}%)" if trig and dist is not None else (trig or "—")
             L.append(f"| {h['name']}({h['code']}) | {h.get('cost')}/{h.get('price')} | "
-                     f"{h.get('pnl_pct')}% | **{h['action']}** | {h.get('trigger')} | "
+                     f"{h.get('pnl_pct')}% | {round(h['mktval']) if h.get('mktval') else '—'} | "
+                     f"**{h['action']}** | {trig_disp} | {h.get('stop')} | "
                      f"{h.get('ratio')} | {h['note']} |")
     if ap["pool"]:
         L += ["", "## 荐股端动作", "",
