@@ -166,7 +166,11 @@ def main() -> None:
         turn_pct = round((bars[-1].get("换手", 0) or 0) * 100, 2)
         jd = judge.synthesize(ind, chip, judge.flow_sum(flow), chan_res,
                               round(target, 2), dd, turn_pct, strategy=kind)
+        import emotion as _emo
+        import fundamental as _fnd
         p = {"code": code, "name": name, "sector": f"全局·{kind}", "sector_pct": 0.0,
+             "stock_emotion": _emo.stock_heat(code, bars),
+             "fundamental": _fnd.summarize(code),
              "signal": sc["signal"], "score": sc["total"], "breakdown": sc["breakdown"],
              "entry_date": ind["date"], "entry_close": ind["close"],
              "plan_stop": jd["structural_stop"]["stop"], "plan_target": round(target, 2),

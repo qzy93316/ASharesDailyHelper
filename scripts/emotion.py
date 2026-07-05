@@ -198,6 +198,86 @@ def backfill(days: int) -> int:
     return added
 
 
+def _pools_for_heat(date: str) -> dict:
+    """个股情绪画像用的三池索引(涨停/炸板/昨涨停,按代码),当日缓存。"""
+    key = f"emotion_pools:{date}"
+    data, _ = cache.load(key)
+    if data:
+        return data
+    zt, q1 = _pool("getTopicZTPool", "fbt:asc", date)
+    if q1 and q1 != date:
+        return {}
+    zb, _ = _pool("getTopicZBPool", "fbt:asc", date)
+    yzt, _ = _pool("getYesterdayZTPool", "zs:desc", date)
+    ind_zt: dict[str, int] = {}
+    for s in zt:
+        hy = s.get("hybk") or ""
+        if hy:
+            ind_zt[hy] = ind_zt.get(hy, 0) + 1
+    idx = {"date": date,
+           "zt": {str(s["c"]).zfill(6): {"lbc": s["lbc"],
+                  "stat": f'{(s.get("zttj") or {}).get("days","?")}天{(s.get("zttj") or {}).get("ct","?")}板',
+                  "industry": s.get("hybk", "")} for s in zt},
+           "zb": {str(s["c"]).zfill(6): {"break_times": s.get("zbc", 0)} for s in zb},
+           "yzt": {str(s["c"]).zfill(6): {"pct": round(s["zdp"], 2)} for s in yzt},
+           "industry_zt": ind_zt}
+    cache.save(key, idx)
+    return idx
+
+
+def stock_heat(code: str, bars: list[dict] | None = None, industry: str = "") -> dict | None:
+    """单只个股的情绪画像(影子指标,与大盘温度计同源):
+    今日涨停/炸板/昨日涨停状态、连板数、近60日涨停基因、所属行业今日涨停家数。
+    bars 传日K([{c,...}]含涨跌可算涨停基因);industry 缺省时从涨停池回填。"""
+    d = dt.date.today()
+    pools = {}
+    for _ in range(8):  # 回退找最近交易日
+        pools = _pools_for_heat(f"{d:%Y%m%d}")
+        if pools:
+            break
+        d -= dt.timedelta(days=1)
+    if not pools:
+        return None
+    code = str(code).zfill(6)
+    zt_hit = pools["zt"].get(code)
+    zb_hit = pools["zb"].get(code)
+    yzt_hit = pools["yzt"].get(code)
+    lim = _limit_pct(code)
+    zt60 = 0
+    if bars:
+        closes = [b["c"] for b in bars[-61:]]
+        for i in range(1, len(closes)):
+            if closes[i-1] > 0 and (closes[i] / closes[i-1] - 1) * 100 >= lim:
+                zt60 += 1
+    industry = industry or (zt_hit or {}).get("industry", "")
+    ind_zt_n = pools["industry_zt"].get(industry, 0) if industry else None
+    tags = []
+    if zt_hit:
+        tags.append(f"今日涨停({zt_hit['stat']})" if zt_hit["lbc"] <= 1
+                    else f"今日{zt_hit['lbc']}连板({zt_hit['stat']})")
+    if zb_hit:
+        tags.append(f"今日炸板×{zb_hit['break_times']}")
+    if yzt_hit:
+        tags.append(f"昨日涨停今日{yzt_hit['pct']:+}%")
+    if zt60 >= 3:
+        tags.append(f"涨停基因×{zt60}/60日")
+    if ind_zt_n:
+        tags.append(f"同行业今日涨停{ind_zt_n}家")
+    # 情绪属性分级:龙头(连板/高涨停基因) > 活跃(涨停/题材共振) > 平静
+    if zt_hit and zt_hit["lbc"] >= 2:
+        grade = "情绪龙头"
+    elif zt_hit or (zt60 >= 5) or (ind_zt_n or 0) >= 5:
+        grade = "情绪活跃"
+    elif zb_hit or yzt_hit or zt60 >= 3:
+        grade = "有情绪属性"
+    else:
+        grade = "情绪平静"
+    return {"date": pools["date"], "grade": grade, "tags": tags, "zt60": zt60,
+            "limit_up_today": bool(zt_hit), "lbc": (zt_hit or {}).get("lbc", 0),
+            "broke_today": bool(zb_hit), "yzt_pct": (yzt_hit or {}).get("pct"),
+            "industry_zt_count": ind_zt_n}
+
+
 def brief(snap: dict) -> str:
     """一行文字摘要(日报/侧车展示用)。"""
     parts = [f"情绪温度 {snap['temperature']}/100({snap['phase']})",

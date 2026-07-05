@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import fetcher  # noqa: E402
 import chips  # noqa: E402
 import emotion  # noqa: E402
+import fundamental  # noqa: E402
 from indicators import compute_indicators  # noqa: E402
 from scoring import score_stock  # noqa: E402
 
@@ -198,8 +199,10 @@ def build_sidecar(today, indexes, top_sectors, picks, scanned, cfg, source, regi
         chan_res = chan.analyze(bars)
         turn_pct = round((bars[-1].get("换手", 0) or 0) * 100, 2)
         jd = judge.synthesize(ind, chip, judge.flow_sum(flow), chan_res, target, dd, turn_pct)
+        heat = emotion.stock_heat(p["code"], bars, industry=p.get("sector", ""))
+        fnd = fundamental.summarize(p["code"])
         out_picks.append({
-            "code": p["code"], "name": p["name"],
+            "code": p["code"], "name": p["name"], "stock_emotion": heat, "fundamental": fnd,
             "sector": p["sector"], "sector_pct": round(float(p["sector_pct"]), 2),
             "signal": p["sc"]["signal"], "score": p["sc"]["total"],
             "breakdown": p["sc"]["breakdown"],
@@ -265,9 +268,19 @@ def render(today, indexes, top_sectors, picks, scanned, cfg, source="东财", em
         if p.get("sector_avg") is not None:
             rel = (f",**高于板块平均结构**(板块均{p['sector_avg']})" if p.get("above_sector")
                    else f"(板块均{p['sector_avg']})")
+        heat = emotion.stock_heat(p["code"], [{"c": float(x)} for x in p["kline"]["收盘"].tail(61)],
+                                  industry=p.get("sector", ""))
+        heat_line = (f"- **个股情绪(影子)**:{heat['grade']}"
+                     + (f";{'; '.join(heat['tags'])}" if heat["tags"] else "")) if heat else None
+        fnd = fundamental.summarize(p["code"])
+        fnd_line = (f"- **基本面速览**:{fnd['comment']}"
+                    + (f"|{';'.join(t for t in fnd['tags'] if '分位' not in t)}"
+                       if fnd.get("tags") else "")) if fnd else None
         L += [f"### {p['name']}({p['code']}) — {s['signal']} 评分 {s['total']}/100",
               "",
               f"- **所属板块**:{p['sector']}({p['sector_pct']:+.2f}%){rel}",
+              *([heat_line] if heat_line else []),
+              *([fnd_line] if fnd_line else []),
               f"- **现价**:{i['close']}({i['pct_chg']:+.2f}%)|{p['fresh_msg']}",
               f"- **技术面**:{i['alignment']};MACD {i['macd_cross']}"
               f"{'(零轴上)' if i['macd_above_zero'] else '(零轴下)'};"

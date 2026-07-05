@@ -213,8 +213,26 @@ def _build_stock(p):
         "stabil_signal": p.get("stabil_signal"),
         "above_sector": p.get("above_sector", False), "sector_avg": p.get("sector_avg"),
         "judge": p.get("judge"),  # 研判合成结果(立场/结构止损/盈亏比/矛盾/入场/失效)
+        "emotion_comment": _emotion_comment(p.get("stock_emotion")),
+        "fund_comment": _fund_comment(p.get("fundamental")),
     })
     return s
+
+
+def _fund_comment(f: dict | None) -> str:
+    """基本面速览 → 一句话。"""
+    if not f:
+        return ""
+    extra = ";".join(t for t in (f.get("tags") or []) if "分位" not in t)
+    return f.get("comment", "") + (f" —— {extra}" if extra else "")
+
+
+def _emotion_comment(heat: dict | None) -> str:
+    """个股情绪画像 → 一句话(影子指标)。"""
+    if not heat:
+        return ""
+    tags = ";".join(heat.get("tags") or [])
+    return f"{heat['grade']}" + (f" — {tags}" if tags else "") + "(影子指标,不参与评分)"
 
 
 CSS = """
@@ -481,6 +499,8 @@ function render(){
  var items=[];
  if(state.tab==='chan'||state.tab==='pattern')items.push({i:'📐',t:'缠论/形态',x:s.chan_comment});
  else if(state.tab==='candle')items.push({i:'🕯️',t:'K线形态',x:s.candle_comment});
+ if(s.emotion_comment)items.push({i:'🔥',t:'个股情绪',x:s.emotion_comment});
+ if(s.fund_comment)items.push({i:'📊',t:'基本面速览',x:s.fund_comment});
  items.push({i:'🧭',t:'筹码控盘',x:s.chip_comment});
  items.push({i:'💰',t:'资金流向',x:s.flow_comment});
  (s.tips||[]).forEach(function(tp){items.push({i:tp.icon,t:tp.title,x:tp.text});});

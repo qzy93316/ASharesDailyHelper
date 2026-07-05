@@ -18,6 +18,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 import fetcher  # noqa: E402
 import chips  # noqa: E402
 import chan  # noqa: E402
+import emotion  # noqa: E402
+import fundamental  # noqa: E402
 import judge  # noqa: E402
 from indicators import compute_indicators  # noqa: E402
 from scoring import score_stock  # noqa: E402
@@ -51,6 +53,8 @@ def analyze_one(code: str, name: str, cfg: dict) -> dict:
     jd = judge.synthesize(ind, chip, judge.flow_sum(flow), chan_res, target, dd, turn_pct)
     return {
         "code": code, "name": name, "sector": "点名分析", "sector_pct": 0.0,
+        "stock_emotion": emotion.stock_heat(code, bars),
+        "fundamental": fundamental.summarize(code),
         "signal": sc["signal"], "score": sc["total"], "breakdown": sc["breakdown"],
         "entry_date": ind["date"], "entry_close": ind["close"],
         "plan_stop": jd["structural_stop"]["stop"], "plan_target": target,
