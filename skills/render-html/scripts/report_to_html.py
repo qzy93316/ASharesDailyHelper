@@ -597,7 +597,7 @@ def render(data, global_data=None, news_md=None):
                 med = f"{sx['median_chg']:+.2f}%" if sx.get("median_chg") is not None else "—"
                 mc = "up" if (sx.get("median_chg") or 0) >= 0 else "down"
                 parts.append(f"<tr><td>{sx['name']}</td><td class='{gcls.get(sx.get('grade'),'')}'>{sx.get('grade','')}</td>"
-                             f"<td>{sx.get('strength')}</td><td class='{cls}'>{sign}{sx['pct']}%</td>"
+                             f"<td>{sx.get('strength')}</td><td class='{cls}'>{sign}{sx['pct']:.2f}%</td>"
                              f"<td>{adv}</td><td class='{mc}'>{med}</td></tr>")
             parts.append("</tbody></table>")
         else:
