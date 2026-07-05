@@ -6,3 +6,4 @@
 |---|---|---|---|
 | `a-share-skill/` | https://github.com/shouldnotappearcalm/a-share-skill | `8494623` | 见 LICENSE |
 | `Stock-Analysis-Skill/` | https://github.com/liusai0820/Stock-Analysis-Skill | `00f0ecb` | 见其 README |
+| `a-stock-data/` | https://github.com/simonlin1212/a-stock-data | `bcda405`(v3.3.0) | Apache-2.0 |

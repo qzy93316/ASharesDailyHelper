@@ -158,8 +158,10 @@ def cmd_daily(args) -> None:
     if not data:
         print(f"找不到 {args.date} 的侧车 JSON(reports/日报-{args.date}.json),先跑 daily_report。"); return
     rows = [evaluate_pick(p, args.hold) for p in data.get("picks", [])]
+    phase = (data.get("emotion") or {}).get("phase")  # 荐股当日情绪周期阶段(影子)
     for r in rows:
         r.setdefault("entry_date", args.date)
+        r["emotion_phase"] = phase
     summ = _summary(rows)
     _append_ledger(rows)
     out = _write_md(f"复盘-{args.date}", rows, summ, args.hold)
@@ -174,9 +176,11 @@ def cmd_range(args) -> None:
     while d <= d1:
         data = _load_sidecar(d.isoformat())
         if data:
+            phase = (data.get("emotion") or {}).get("phase")
             for p in data.get("picks", []):
                 r = evaluate_pick(p, args.hold)
                 r.setdefault("entry_date", d.isoformat())
+                r["emotion_phase"] = phase
                 rows.append(r)
         d += timedelta(days=1)
     summ = _summary(rows)
@@ -200,9 +204,10 @@ def cmd_stats(args) -> None:
         d = [x for x in rs if not x.get("pending")]
         return {"n": len(d), "win_rate_pct": round(sum(1 for x in d if x["success"]) / len(d) * 100, 1) if d else None}
     # 影子验证:按 策略路 / 单个因子 分组统计命中率,判断哪个因子真有效
-    by_strategy, by_factor = defaultdict(list), defaultdict(list)
+    by_strategy, by_factor, by_phase = defaultdict(list), defaultdict(list), defaultdict(list)
     for r in rows:
         by_strategy[r.get("strategy") or "?"].append(r)
+        by_phase[r.get("emotion_phase") or "?"].append(r)  # 情绪周期分组(影子验证)
         for fk in (r.get("factor_keys") or []):
             by_factor[fk].append(r)
     print(json.dumps({
@@ -211,6 +216,7 @@ def cmd_stats(args) -> None:
         "by_score": {k: wr(v) for k, v in by_score.items()},
         "by_strategy": {k: wr(v) for k, v in by_strategy.items()},
         "by_factor": {k: wr(v) for k, v in by_factor.items()},
+        "by_emotion_phase": {k: wr(v) for k, v in by_phase.items()},
     }, ensure_ascii=False, indent=2))
 
 

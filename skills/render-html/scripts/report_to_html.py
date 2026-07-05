@@ -563,6 +563,19 @@ def render(data, global_data=None, news_md=None):
                      f"<div class='act-main'>{regime['level']}</div>"
                      f"<div class='act-sec'>上证 {regime.get('close')} · MA20 {regime.get('ma20')} · MA60 {regime.get('ma60')}"
                      f" —— {regime.get('note','')}</div></div>")
+    emo = data.get("emotion") or (global_data.get("emotion") if global_data else None)
+    if emo and emo.get("phase"):
+        ec = {"高潮": "act-bull", "发酵": "act-bull", "分歧": "act-neutral",
+              "退潮": "act-bear", "冰点": "act-bear"}.get(emo["phase"], "act-neutral")
+        ladder = " ".join(f"{k}板×{v}" for k, v in (emo.get("ladder") or {}).items()) or "无"
+        prom = f"{emo['promotion_rate']}%" if emo.get("promotion_rate") is not None else "—"
+        prem = f"{emo['yzt_premium']:+}%" if emo.get("yzt_premium") is not None else "—"
+        turning = f" · {emo['turning']}" if emo.get("turning") else ""
+        parts.append(f"<div class='action {ec}'><div class='act-hd'>🌡️ 短线情绪温度计(影子指标,暂不参与选股)</div>"
+                     f"<div class='act-main'>{emo['temperature']}/100 · {emo['phase']}</div>"
+                     f"<div class='act-sec'>涨停{emo.get('zt_count')}家 · 炸板率{emo.get('break_rate')}% · "
+                     f"最高{emo.get('max_height')}连板 · 梯队 {ladder} · 晋级率{prom} · 昨停溢价{prem}{turning}"
+                     f" —— {emo.get('note','')}</div></div>")
     idx = 1
     if not is_stock_only and data.get("indexes"):
         parts.append(f"<h2>{'一二三四五'[idx-1]}、大盘</h2><table><thead><tr><th>指数</th><th>收盘</th><th>涨跌幅</th><th>日期</th></tr></thead><tbody>")

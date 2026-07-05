@@ -14,6 +14,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent))
 import fetcher  # noqa: E402
 import chips  # noqa: E402
+import emotion  # noqa: E402
 from indicators import compute_indicators  # noqa: E402
 from scoring import score_stock  # noqa: E402
 
@@ -82,6 +83,10 @@ def main() -> None:
     eff_min_score = rp["min_score"] + regime.get("score_delta", 0)
     eff_max_picks = max(1, round(rp["max_picks"] * regime.get("picks_factor", 1.0)))
     print(f"  [环境] 大盘 {regime.get('level')} → 入池门槛 {eff_min_score} 分、上限 {eff_max_picks} 只")
+    # 情绪周期温度计(影子运行:只展示/落台账,暂不 gate 选股;胜率验证后转正)
+    emo = emotion.latest_snapshot()
+    if emo:
+        print(f"  [情绪] {emotion.brief(emo)}")
 
     print("[2/4] 拉取板块行情 + 强弱分析...")
     sectors = fetcher.get_sector_rank()
@@ -155,13 +160,13 @@ def main() -> None:
     picks = picks[: eff_max_picks]
 
     print("[4/4] 生成报告...")
-    md = render(today, indexes, top_sectors, picks, scanned, cfg, source=src)
+    md = render(today, indexes, top_sectors, picks, scanned, cfg, source=src, emo=emo)
     day_dir = ROOT / "reports" / str(today).replace("-", "")  # 按日期归档
     day_dir.mkdir(parents=True, exist_ok=True)
     out = day_dir / f"日报-{today}.md"
     out.write_text(md, encoding="utf-8")
     # 结构化侧车:供 富HTML图表渲染 与 盘后复盘验证 消费(不必再解析 Markdown)
-    sidecar = build_sidecar(today, indexes, top_sectors, picks, scanned, cfg, src, regime)
+    sidecar = build_sidecar(today, indexes, top_sectors, picks, scanned, cfg, src, regime, emo)
     sc_out = day_dir / f"日报-{today}.json"
     sc_out.write_text(json.dumps(sidecar, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"完成 → {out}")
@@ -174,7 +179,8 @@ def _plan_prices(ind: dict, dd: float) -> tuple[float, float]:
     return round(stop, 2), round(ind["pressure"], 2)
 
 
-def build_sidecar(today, indexes, top_sectors, picks, scanned, cfg, source, regime=None) -> dict:
+def build_sidecar(today, indexes, top_sectors, picks, scanned, cfg, source, regime=None,
+                  emo=None) -> dict:
     """把当日报告的全部结构化数据(K线/筹码/资金流)导出为机器可读 JSON。"""
     dd = cfg["style"]["max_drawdown_pct"]
     chart_bars = int(cfg.get("report", {}).get("chart_bars", 120))
@@ -206,7 +212,7 @@ def build_sidecar(today, indexes, top_sectors, picks, scanned, cfg, source, regi
         })
     return {
         "date": str(today), "source": source, "scanned": scanned,
-        "indexes": indexes, "regime": regime,
+        "indexes": indexes, "regime": regime, "emotion": emo,
         "sectors": [{"name": s["name"], "pct": s["pct"], "strength": s["strength"],
                      "grade": s["grade"], "adv_ratio": s["adv_ratio"],
                      "median_chg": s["median_chg"], "n_up": s["n_up"], "n_total": s["n_total"],
@@ -215,7 +221,7 @@ def build_sidecar(today, indexes, top_sectors, picks, scanned, cfg, source, regi
     }
 
 
-def render(today, indexes, top_sectors, picks, scanned, cfg, source="东财") -> str:
+def render(today, indexes, top_sectors, picks, scanned, cfg, source="东财", emo=None) -> str:
     dd = cfg["style"]["max_drawdown_pct"]
     L = [f"# A股每日盘前报告 — {today}",
          "",
@@ -227,6 +233,11 @@ def render(today, indexes, top_sectors, picks, scanned, cfg, source="东财") ->
          "|---|---|---|---|"]
     for ix in indexes:
         L.append(f"| {ix['name']} | {ix['close']} | {ix['pct']:+.2f}% | {ix['date']} |")
+
+    if emo:
+        ladder = " ".join(f"{k}板×{v}" for k, v in emo.get("ladder", {}).items())
+        L += ["", f"**短线情绪温度计(影子指标)**:{emotion.brief(emo)}",
+              f"> 连板梯队:{ladder or '无'} · 周期阶段建议:{emo['note']}(暂不影响选股门槛,验证期)"]
 
     L += ["", "## 二、板块强弱榜", "",
           "> 强弱分 = 动量(涨跌幅) + 广度(上涨家数占比) + 中位涨幅;广度高=普涨真强,只领涨股涨=假强。", "",

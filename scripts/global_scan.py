@@ -259,8 +259,11 @@ def main() -> None:
     picks = trend[:cap_each] + oversold[:cap_each]
 
     print(f"[3/3] 输出(趋势 {len(trend[:cap_each])} + 超跌影子 {len(oversold[:cap_each])})...")
+    import emotion
+    emo = emotion.latest_snapshot()  # 情绪周期(影子:只写侧车展示,不 gate)
     out = {"date": args.date, "source": "全局扫描", "scanned": len(cand),
-           "indexes": fetcher.get_index_snapshot(), "sectors": [], "regime": regime, "picks": picks}
+           "indexes": fetcher.get_index_snapshot(), "sectors": [], "regime": regime,
+           "emotion": emo, "picks": picks}
     f = day_dir / f"全局池-{args.date}.json"
     f.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"完成 → {f}(入池 {len(picks)} 只)")
