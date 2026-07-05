@@ -61,22 +61,23 @@ def _holding_action(p):
     press = i.get("pressure")
     ma10 = i.get("ma10")
     if tag == "止损":
-        return {"action": "清仓/止损", "trigger": stop, "ratio": "100%",
-                "note": f"已破结构止损 {stop},纪律离场,勿扛"}
+        return {"action": "清仓/止损", "trigger": stop, "trigger_dir": "down", "stop": stop,
+                "ratio": "100%", "note": f"已破结构止损 {stop},纪律离场,勿扛"}
     if tag == "重亏警戒":
-        return {"action": "减仓", "trigger": press or cost, "ratio": "1/3~1/2",
+        return {"action": "减仓", "trigger": press or cost, "trigger_dir": "up", "stop": stop,
+                "ratio": "1/3~1/2",
                 "note": f"浮亏过深,反弹到 {press or cost} 附近减亏,不补仓摊低;破 {stop} 清"}
     if tag == "逢反弹减":
-        return {"action": "减仓", "trigger": press or cost, "ratio": "1/3",
-                "note": f"趋势资金双弱,反弹到压力/成本 {press or cost} 减,守 {stop}"}
+        return {"action": "减仓", "trigger": press or cost, "trigger_dir": "up", "stop": stop,
+                "ratio": "1/3", "note": f"趋势资金双弱,反弹到压力/成本 {press or cost} 减,守 {stop}"}
     if tag == "持有观察":
         # 逆势吸筹的强结构可考虑逢低加仓
         add = ma10 if (ma10 and price and price > ma10) else stop
-        return {"action": "逢低加仓/持有", "trigger": add, "ratio": "≤1/3",
-                "note": f"资金逆势吸筹,回踩 {add} 不破可小幅加,守 {stop}"}
+        return {"action": "逢低加仓/持有", "trigger": add, "trigger_dir": "down", "stop": stop,
+                "ratio": "≤1/3", "note": f"资金逆势吸筹,回踩 {add} 不破可小幅加,守 {stop}"}
     # 持有 / 观察
-    return {"action": "持有", "trigger": stop, "ratio": "—",
-            "note": f"结构未破,守结构止损 {stop};跌破离场"}
+    return {"action": "持有", "trigger": stop, "trigger_dir": "down", "stop": stop,
+            "ratio": "—", "note": f"结构未破,守结构止损 {stop};跌破离场"}
 
 
 def _pool_action(p):
@@ -120,10 +121,19 @@ def _match_focus(p, focus):
     return any(k == p.get("code") or k in (p.get("name") or "") for k in keys)
 
 
+def _load_cfg():
+    import yaml
+    return yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
+
+
 def build_action_plan(date: str, focus: str | None = None) -> dict:
     diag = _load(date, "持仓诊断")
     daily = _load(date, "日报")
     glob = _load(date, "全局池")
+    _rp = _load_cfg().get("report", {}) or {}
+    total_assets = _rp.get("total_assets")           # 总资产为可负担基准(实操可先卖后买腾资金)
+    afford_ratio = float(_rp.get("lot_afford_ratio", 0.6) or 0.6)
+    afford_cap = total_assets * afford_ratio if total_assets else None  # 单只1手金额上限
     regime = (daily or {}).get("regime") or (glob or {}).get("regime")
     emotion = (daily or {}).get("emotion") or (glob or {}).get("emotion")
 
@@ -149,19 +159,32 @@ def build_action_plan(date: str, focus: str | None = None) -> dict:
                     continue
                 seen.add(p["code"])
                 act = _pool_action(p)
+                # 可负担:1手(100股)金额 vs 总资产×比例(而非可用现金,实操可先卖后买腾资金)
+                lot_price = act.get("plan_price") or (p.get("indicators") or {}).get("close")
+                lot_cost = round(lot_price * 100) if lot_price else None
+                affordable = (afford_cap is None) or (lot_cost is not None and lot_cost <= afford_cap)
                 pool.append({"code": p["code"], "name": p["name"],
                              "sector": p.get("sector", ""), "pool": p.get("pool", "热点"),
-                             "signal": p.get("signal"), "score": p.get("score"), **act})
+                             "signal": p.get("signal"), "score": p.get("score"),
+                             "lot_cost": lot_cost, "affordable": affordable, **act})
         pool.sort(key=lambda x: (x.get("quality") or -99), reverse=True)
 
-    # 换股:卖弱(持仓减/清)→ 买强(荐股 建仓/逢低吸 且 quality 高)
+    # 换股:卖弱(持仓减/清)→ 买强(荐股 建仓/逢低吸 且 quality 高 且 买得起)
     sells = [h for h in holdings if h["action"] in ("清仓/止损", "减仓")]
-    buys = [p for p in pool if p["action"] in ("建仓", "逢低吸")]
+    buys = [p for p in pool if p["action"] in ("建仓", "逢低吸") and p.get("affordable")]
     swaps = []
     for s, b in zip(sells, buys[:len(sells)]):
+        aff = f",1手约{b.get('lot_cost')}元" if b.get("lot_cost") else ""
         swaps.append({"sell": f"{s['name']}({s['code']})", "buy": f"{b['name']}({b['code']})",
                       "note": f"{s['action']} {s['name']} 腾资金,择机换入 {b['name']}"
-                              f"(质量分{b.get('quality')},{b['action']} @ {b.get('plan_price')})"})
+                              f"(质量分{b.get('quality')},{b['action']} @ {b.get('plan_price')}{aff})"})
+    if afford_cap is not None:
+        unaff = [f"{p['name']}(1手约{p.get('lot_cost')}元)" for p in pool
+                 if p["action"] in ("建仓", "逢低吸") and not p.get("affordable")]
+        if unaff:
+            swaps.append({"sell": "—", "buy": "—",
+                          "note": f"⚠️ 1手金额超总资产{int(afford_ratio*100)}%({round(afford_cap)}元)门槛,"
+                                  f"从换股候选剔除:{', '.join(unaff[:6])}"})
 
     posture = _pos_advice(regime, emotion)
     if diag and diag.get("portfolio"):
