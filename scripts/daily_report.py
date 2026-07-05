@@ -14,6 +14,8 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent))
 import fetcher  # noqa: E402
 import chips  # noqa: E402
+import chan  # noqa: E402
+import judge  # noqa: E402
 import emotion  # noqa: E402
 import fundamental  # noqa: E402
 from indicators import compute_indicators  # noqa: E402
@@ -48,10 +50,27 @@ def is_excluded(name: str, code: str, filters: dict) -> bool:
     return False
 
 
-def analyze_sector_strength(sec, cons) -> dict:
+def sector_size(sec, n_total: int = 0) -> int:
+    """板块容量(成分股数):DangInvest 的『成分数』精确 → 东财的『上涨+下跌家数』近似
+    → 成分股实际条数 n_total 兜底。数据源都没给时返回 0(上游据此『不误杀』)。"""
+    s = int(sec.get("成分数") or 0)
+    if not s:
+        up, dn = sec.get("上涨家数"), sec.get("下跌家数")
+        if up is not None or dn is not None:
+            try:
+                s = int(up or 0) + int(dn or 0)
+            except (TypeError, ValueError):
+                s = 0
+    return s or n_total
+
+
+def analyze_sector_strength(sec, cons, size_weight: float = 0.0) -> dict:
     """板块强弱量化(先看板块):不只看涨跌幅,而是综合
     ①动量(涨跌幅)②广度(上涨家数占比 —— 普涨才是真强,只领涨股涨是假强)
-    ③中位涨幅(抗领涨股拉偏)。强弱分越高越强,给出 强/中/弱 评级。"""
+    ③中位涨幅(抗领涨股拉偏)。强弱分越高越强,给出 强/中/弱 评级。
+    容量(方案B):强弱分保持纯净(只驱动评级),另算 size_score=log10(成分数)×权重,
+    合成 rank_score=强弱分+size_score 供选板块排序 —— 大容量同等强度优先,评级口径不变。"""
+    import math
     import pandas as pd
     pct = float(sec.get("涨跌幅", 0) or 0)
     adv_ratio, median_chg, n_up, n_total = None, None, 0, 0
@@ -67,10 +86,80 @@ def analyze_sector_strength(sec, cons) -> dict:
         strength += (adv_ratio * 100 - 50) * 0.3 + (median_chg or 0) * 0.3
     strength = round(strength, 1)
     grade = "强" if strength >= 5 else ("中" if strength >= 1 else "弱")
+    size = sector_size(sec, n_total)
+    mcap_yi = round(float(sec.get("总市值") or 0) / 1e8)  # 元 → 亿
+    size_score = round(math.log10(max(size, 1)) * size_weight, 1)
+    rank_score = round(strength + size_score, 1)
     return {"name": sec["板块名称"], "pct": pct, "key": sec.get("_key", sec["板块名称"]),
             "src": sec.get("_源", "东财"), "adv_ratio": adv_ratio, "median_chg": median_chg,
             "n_up": n_up, "n_total": n_total, "strength": strength, "grade": grade,
-            "leader": sec.get("领涨股票", "—")}
+            "size": size, "mcap_yi": mcap_yi, "size_score": size_score,
+            "rank_score": rank_score, "leader": sec.get("领涨股票", "—")}
+
+
+def scan_concepts(cfg, eff_min_score, exclude_codes):
+    """方案C 概念板块并轨:同花顺概念 → 三重过滤(黑名单+容量上下限)→ 涨幅排序
+    → 热榜(前8) + 概念内个股扫描(top_concepts×stocks_per_sector,评分门槛+否决)。
+    概念不套用容量权重(已卡进区间,概念非越大越好);与行业池按代码去重。
+    返回 (concept_hotlist, concept_picks)。"""
+    rp, fl, hr = cfg["report"], cfg["filters"], cfg["hard_rules"]
+    if not rp.get("scan_concepts"):
+        return [], []
+    try:
+        cr = fetcher.get_concept_rank()
+    except Exception as e:  # noqa: BLE001
+        print(f"  [概念并轨] 概念榜获取失败,跳过 —— {e}")
+        return [], []
+    black = rp.get("concept_blacklist") or []
+    max_size, min_size = int(rp.get("concept_max_size", 400)), int(rp.get("min_sector_size", 15))
+
+    def _keep(row) -> bool:
+        name = str(row["板块名称"])
+        if any(b in name for b in black):
+            return False
+        sz = int(row.get("成分数") or 0)
+        return min_size <= sz <= max_size
+
+    cand = cr[cr.apply(_keep, axis=1)].sort_values("涨跌幅", ascending=False)
+    if not len(cand):
+        return [], []
+    hotlist = [{"name": r["板块名称"], "pct": round(float(r["涨跌幅"]), 2),
+                "size": int(r.get("成分数") or 0)} for _, r in cand.head(8).iterrows()]
+    picks = []
+    for _, csec in cand.head(int(rp.get("top_concepts", 3))).iterrows():
+        cname, cpct = csec["板块名称"], round(float(csec["涨跌幅"]), 2)
+        try:
+            cons = fetcher.get_concept_cons(csec["_key"])
+        except Exception as e:  # noqa: BLE001
+            print(f"  跳过概念 {cname}: 成分股获取失败 —— {e}")
+            continue
+        cons = cons.sort_values("成交额", ascending=False) if "成交额" in cons else cons
+        count = 0
+        for _, row in cons.iterrows():
+            if count >= rp["stocks_per_sector"]:
+                break
+            code, name = str(row["代码"]).zfill(6), row["名称"]
+            if is_excluded(name, code, fl) or code in exclude_codes:
+                continue
+            count += 1
+            try:
+                k = fetcher.get_kline(code, rp["kline_days"])
+                if fl.get("exclude_sub_new") and len(k) < 60:
+                    continue
+                fresh, fresh_msg = fetcher.check_freshness(k, cfg["data"]["freshness_max_age_days"])
+                if not fresh:
+                    continue
+                ind = compute_indicators(k)
+                sc = score_stock(ind, hr)
+                if sc["total"] < eff_min_score or sc["vetoes"]:
+                    continue
+                exclude_codes.add(code)  # 防同一股在多个热门概念里重复入池
+                picks.append({"sector": f"概念·{cname}", "sector_pct": cpct,
+                              "code": code, "name": name, "ind": ind, "sc": sc,
+                              "fresh_msg": fresh_msg, "kline": k, "pool": "概念"})
+            except Exception as e:  # noqa: BLE001
+                print(f"  跳过 {name}: {e}")
+    return hotlist, picks
 
 
 def main() -> None:
@@ -93,8 +182,21 @@ def main() -> None:
     sectors = fetcher.get_sector_rank()
     src = sectors["_源"].iloc[0] if "_源" in sectors else "东财"
     print(f"  板块数据源:{src}")
-    # 先看板块:对涨幅靠前的板块做强弱分析(涨跌幅+广度+中位涨幅),再按强弱分排序
-    cand_sectors = sectors.sort_values("涨跌幅", ascending=False).head(rp["top_sectors"] * 2)
+    # 先看板块:涨幅排序 → 容量门槛(A)滤掉伪板块 → 强弱+容量分(B)重排 → 取 top_sectors
+    size_weight = float(rp.get("sector_size_weight", 0) or 0)
+    min_size = int(rp.get("min_sector_size", 0) or 0)
+    ranked = sectors.sort_values("涨跌幅", ascending=False)
+    if min_size > 0:
+        # 成分数为0(数据源未给容量)时保留不误杀;<门槛的小容量板块滤除
+        sizes = ranked.apply(lambda r: sector_size(r), axis=1)
+        killed = ranked[(sizes > 0) & (sizes < min_size)]
+        ranked = ranked[~((sizes > 0) & (sizes < min_size))]
+        if len(killed):
+            dropped = [(r["板块名称"], sector_size(r)) for _, r in killed.head(6).iterrows()]
+            print(f"  [容量门槛<{min_size}只] 滤除小容量板块:"
+                  + ", ".join(f"{n}({s}只)" for n, s in dropped)
+                  + (" …" if len(killed) > 6 else ""))
+    cand_sectors = ranked.head(rp["top_sectors"] * 2)
     sector_rank, cons_cache = [], {}
     for _, sec in cand_sectors.iterrows():
         try:
@@ -103,12 +205,12 @@ def main() -> None:
             print(f"  跳过板块 {sec['板块名称']}: 成分股获取失败 —— {e}")
             continue
         cons_cache[sec["板块名称"]] = cons
-        sector_rank.append(analyze_sector_strength(sec, cons))
-    sector_rank.sort(key=lambda s: s["strength"], reverse=True)
+        sector_rank.append(analyze_sector_strength(sec, cons, size_weight))
+    sector_rank.sort(key=lambda s: s["rank_score"], reverse=True)  # 容量加权后的排序分
     top_sectors = sector_rank[: rp["top_sectors"]]
     print("  板块强弱榜:" + " / ".join(
-        f"{s['name']}[{s['grade']}{s['strength']} 涨{s['pct']}% 广度"
-        f"{int(s['adv_ratio']*100) if s['adv_ratio'] is not None else '-'}%]" for s in top_sectors))
+        f"{s['name']}[{s['grade']}{s['strength']}+容量{s['size_score']}={s['rank_score']} "
+        f"{s['size']}只 涨{s['pct']}%]" for s in top_sectors))
 
     print("[3/4] 扫描强板块内候选股,选高于板块平均结构者...")
     picks, scanned = [], 0
@@ -160,14 +262,24 @@ def main() -> None:
     picks.sort(key=lambda p: (p.get("above_sector", False), p["sc"]["total"]), reverse=True)
     picks = picks[: eff_max_picks]
 
+    # 方案C:概念板块并轨 —— 过滤垃圾概念 → 热榜 + 概念内个股(独立配额,与行业池去重)
+    concept_hotlist, concept_picks = scan_concepts(cfg, eff_min_score, {p["code"] for p in picks})
+    concept_picks = concept_picks[: eff_max_picks]
+    if concept_picks:
+        print(f"  [概念并轨] 概念池入选 {len(concept_picks)} 只:"
+              + ", ".join(f"{p['name']}({p['sector']})" for p in concept_picks))
+    all_picks = picks + concept_picks
+
     print("[4/4] 生成报告...")
-    md = render(today, indexes, top_sectors, picks, scanned, cfg, source=src, emo=emo)
+    md = render(today, indexes, top_sectors, all_picks, scanned, cfg, source=src, emo=emo,
+                concepts=concept_hotlist)
     day_dir = ROOT / "reports" / str(today).replace("-", "")  # 按日期归档
     day_dir.mkdir(parents=True, exist_ok=True)
     out = day_dir / f"日报-{today}.md"
     out.write_text(md, encoding="utf-8")
     # 结构化侧车:供 富HTML图表渲染 与 盘后复盘验证 消费(不必再解析 Markdown)
-    sidecar = build_sidecar(today, indexes, top_sectors, picks, scanned, cfg, src, regime, emo)
+    sidecar = build_sidecar(today, indexes, top_sectors, all_picks, scanned, cfg, src, regime, emo,
+                            concepts=concept_hotlist)
     sc_out = day_dir / f"日报-{today}.json"
     sc_out.write_text(json.dumps(sidecar, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"完成 → {out}")
@@ -181,7 +293,7 @@ def _plan_prices(ind: dict, dd: float) -> tuple[float, float]:
 
 
 def build_sidecar(today, indexes, top_sectors, picks, scanned, cfg, source, regime=None,
-                  emo=None) -> dict:
+                  emo=None, concepts=None) -> dict:
     """把当日报告的全部结构化数据(K线/筹码/资金流)导出为机器可读 JSON。"""
     dd = cfg["style"]["max_drawdown_pct"]
     chart_bars = int(cfg.get("report", {}).get("chart_bars", 120))
@@ -212,6 +324,7 @@ def build_sidecar(today, indexes, top_sectors, picks, scanned, cfg, source, regi
             "chips": chip, "chip_comment": chips.control_comment(chip),
             "fund_flow": flow, "judge": jd,
             "sector_avg": p.get("sector_avg"), "above_sector": p.get("above_sector", False),
+            "pool": p.get("pool", ""),
         })
     return {
         "date": str(today), "source": source, "scanned": scanned,
@@ -219,12 +332,16 @@ def build_sidecar(today, indexes, top_sectors, picks, scanned, cfg, source, regi
         "sectors": [{"name": s["name"], "pct": s["pct"], "strength": s["strength"],
                      "grade": s["grade"], "adv_ratio": s["adv_ratio"],
                      "median_chg": s["median_chg"], "n_up": s["n_up"], "n_total": s["n_total"],
+                     "size": s.get("size"), "mcap_yi": s.get("mcap_yi"),
+                     "size_score": s.get("size_score"), "rank_score": s.get("rank_score"),
                      "leader": s.get("leader", "—")} for s in top_sectors],
+        "concepts": concepts or [],
         "picks": out_picks,
     }
 
 
-def render(today, indexes, top_sectors, picks, scanned, cfg, source="东财", emo=None) -> str:
+def render(today, indexes, top_sectors, picks, scanned, cfg, source="东财", emo=None,
+           concepts=None) -> str:
     dd = cfg["style"]["max_drawdown_pct"]
     L = [f"# A股每日盘前报告 — {today}",
          "",
@@ -243,18 +360,38 @@ def render(today, indexes, top_sectors, picks, scanned, cfg, source="东财", em
               f"> 连板梯队:{ladder or '无'} · 周期阶段建议:{emo['note']}(暂不影响选股门槛,验证期)"]
 
     L += ["", "## 二、板块强弱榜", "",
-          "> 强弱分 = 动量(涨跌幅) + 广度(上涨家数占比) + 中位涨幅;广度高=普涨真强,只领涨股涨=假强。", "",
-          "| 板块 | 强弱 | 强弱分 | 涨跌幅 | 上涨广度 | 中位涨幅 |", "|---|---|---|---|---|---|"]
+          "> 强弱分 = 动量(涨跌幅) + 广度(上涨家数占比) + 中位涨幅;广度高=普涨真强,只领涨股涨=假强。",
+          "> 排序分 = 强弱分 + 容量分(log10成分数×权重);大容量板块梯队深、资金承接强,同等强度优先(小容量板块已按门槛滤除)。", "",
+          "| 板块 | 强弱 | 强弱分 | 容量分 | 排序分 | 成分数 | 总市值(亿) | 涨跌幅 | 上涨广度 | 中位涨幅 |",
+          "|---|---|---|---|---|---|---|---|---|---|"]
     for s in top_sectors:
         adv = f"{int(s['adv_ratio']*100)}%({s['n_up']}/{s['n_total']})" if s.get("adv_ratio") is not None else "—"
         med = f"{s['median_chg']:+.2f}%" if s.get("median_chg") is not None else "—"
-        L.append(f"| {s['name']} | {s['grade']} | {s['strength']} | {s['pct']:+.2f}% | {adv} | {med} |")
+        L.append(f"| {s['name']} | {s['grade']} | {s['strength']} | +{s.get('size_score',0)} | "
+                 f"{s.get('rank_score',s['strength'])} | {s.get('size','—')} | {s.get('mcap_yi','—')} | "
+                 f"{s['pct']:+.2f}% | {adv} | {med} |")
 
-    L += ["", "## 三、消息面(待 Claude 联网补充)", "",
+    # 大盘(一)、板块强弱榜(二)之后动态编号,概念热榜可选
+    _CN = "一二三四五六七八"
+    _n = [3]  # 下一个大节序号(从三开始)
+
+    def _sec(title):
+        h = f"## {_CN[_n[0]-1]}、{title}"
+        _n[0] += 1
+        return h
+
+    if concepts:
+        L += ["", _sec("概念热榜(题材维度,已滤除融资融券/沪股通类伪概念及指数化巨型概念)"), "",
+              "> 概念是题材聚合,与行业分类互补;此处按涨幅取紧凑热题材(成分15~上限,过滤名单式伪概念)。", "",
+              "| 概念 | 涨跌幅 | 成分数 |", "|---|---|---|"]
+        for c in concepts:
+            L.append(f"| {c['name']} | {c['pct']:+.2f}% | {c['size']} |")
+
+    L += ["", _sec("消息面(待 Claude 联网补充)"), "",
           "<!-- CLAUDE_NEWS_PLACEHOLDER: 对『今日热点』说一声,我会联网搜索当日政策/热点并按",
-          "     板块→催化剂→短期情绪还是中期逻辑 的格式补写本节 -->", ""]
+          "     板块→催化剂→短期情绪还是中期逻辑 的格式补写本节。搜索由『板块强弱榜+概念热榜』共同驱动 -->", ""]
 
-    L += [f"## 四、技术面荐股池(扫描 {scanned} 只,入池 {len(picks)} 只,数据源:{source})", ""]
+    L += [_sec(f"技术面荐股池(扫描 {scanned} 只,入池 {len(picks)} 只,数据源:{source})"), ""]
     if not picks:
         L.append("今日无标的通过评分+硬规则筛选,空仓观望也是操作。")
     for p in picks:
@@ -294,7 +431,7 @@ def render(today, indexes, top_sectors, picks, scanned, cfg, source="东财", em
               f"F10 检查:{THS_GUIDE['F10解禁']}",
               ""]
 
-    L += ["## 五、同花顺指标速查表", "",
+    L += [_sec("同花顺指标速查表"), "",
           "| 项目 | 查看方法 |", "|---|---|"]
     for k, v in THS_GUIDE.items():
         L.append(f"| {k} | {v} |")

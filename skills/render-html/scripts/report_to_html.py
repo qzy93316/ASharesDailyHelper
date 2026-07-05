@@ -598,7 +598,7 @@ def render(data, global_data=None, news_md=None):
                      f" —— {emo.get('note','')}</div></div>")
     idx = 1
     if not is_stock_only and data.get("indexes"):
-        parts.append(f"<h2>{'一二三四五'[idx-1]}、大盘</h2><table><thead><tr><th>指数</th><th>收盘</th><th>涨跌幅</th><th>日期</th></tr></thead><tbody>")
+        parts.append(f"<h2>{'一二三四五六七八'[idx-1]}、大盘</h2><table><thead><tr><th>指数</th><th>收盘</th><th>涨跌幅</th><th>日期</th></tr></thead><tbody>")
         for ix in data["indexes"]:
             cls = "up" if ix["pct"] >= 0 else "down"; sign = "+" if ix["pct"] >= 0 else ""
             parts.append(f"<tr><td>{ix['name']}</td><td>{ix['close']}</td><td class='{cls}'>{sign}{ix['pct']}%</td><td>{ix['date']}</td></tr>")
@@ -606,9 +606,13 @@ def render(data, global_data=None, news_md=None):
     if data.get("sectors"):
         has_str = any("strength" in sx for sx in data["sectors"])
         if has_str:
-            parts.append(f"<h2>{'一二三四五'[idx-1]}、板块强弱榜</h2>"
-                         "<div class='note' style='color:#8fbaff;border-color:#4c8dff'>强弱分 = 动量(涨跌幅)+广度(上涨家数占比)+中位涨幅;广度高=普涨真强,只领涨股涨=假强。</div>"
-                         "<table><thead><tr><th>板块</th><th>强弱</th><th>强弱分</th><th>涨跌幅</th><th>上涨广度</th><th>中位涨幅</th></tr></thead><tbody>")
+            has_size = any(sx.get("size") for sx in data["sectors"])
+            size_hdr = "<th>成分数</th><th>总市值(亿)</th>" if has_size else ""
+            parts.append(f"<h2>{'一二三四五六七八'[idx-1]}、板块强弱榜</h2>"
+                         "<div class='note' style='color:#8fbaff;border-color:#4c8dff'>强弱分 = 动量(涨跌幅)+广度(上涨家数占比)+中位涨幅;广度高=普涨真强,只领涨股涨=假强。"
+                         "排序分 = 强弱分 + 容量分(log10成分数×权重),大容量板块梯队深、资金承接强,同等强度优先(小容量板块已按门槛滤除)。</div>"
+                         "<table><thead><tr><th>板块</th><th>强弱</th><th>强弱分</th><th>排序分</th>"
+                         f"{size_hdr}<th>涨跌幅</th><th>上涨广度</th><th>中位涨幅</th></tr></thead><tbody>")
             gcls = {"强": "up", "中": "", "弱": "down"}
             for sx in data["sectors"]:
                 cls = "up" if sx["pct"] >= 0 else "down"; sign = "+" if sx["pct"] >= 0 else ""
@@ -616,19 +620,36 @@ def render(data, global_data=None, news_md=None):
                        if sx.get("adv_ratio") is not None else "—")
                 med = f"{sx['median_chg']:+.2f}%" if sx.get("median_chg") is not None else "—"
                 mc = "up" if (sx.get("median_chg") or 0) >= 0 else "down"
+                rk = sx.get("rank_score")
+                rk_cell = (f"{rk}<span style='color:#7a869c'>(+{sx.get('size_score',0)})</span>"
+                           if rk is not None and sx.get("size_score") else (rk if rk is not None else "—"))
+                size_cell = (f"<td>{sx.get('size') or '—'}</td><td>{sx.get('mcap_yi') or '—'}</td>"
+                             if has_size else "")
                 parts.append(f"<tr><td>{sx['name']}</td><td class='{gcls.get(sx.get('grade'),'')}'>{sx.get('grade','')}</td>"
-                             f"<td>{sx.get('strength')}</td><td class='{cls}'>{sign}{sx['pct']:.2f}%</td>"
+                             f"<td>{sx.get('strength')}</td><td>{rk_cell}</td>"
+                             f"{size_cell}<td class='{cls}'>{sign}{sx['pct']:.2f}%</td>"
                              f"<td>{adv}</td><td class='{mc}'>{med}</td></tr>")
             parts.append("</tbody></table>")
         else:
-            parts.append(f"<h2>{'一二三四五'[idx-1]}、强势板块</h2><table><thead><tr><th>板块</th><th>涨跌幅</th><th>领涨股</th></tr></thead><tbody>")
+            parts.append(f"<h2>{'一二三四五六七八'[idx-1]}、强势板块</h2><table><thead><tr><th>板块</th><th>涨跌幅</th><th>领涨股</th></tr></thead><tbody>")
             for sx in data["sectors"]:
                 cls = "up" if sx["pct"] >= 0 else "down"; sign = "+" if sx["pct"] >= 0 else ""
                 parts.append(f"<tr><td>{sx['name']}</td><td class='{cls}'>{sign}{sx['pct']}%</td><td>{sx.get('leader','—')}</td></tr>")
             parts.append("</tbody></table>")
         idx += 1
+    concepts = data.get("concepts") or (global_data.get("concepts") if global_data else None)
+    if concepts:
+        parts.append(f"<h2>{'一二三四五六七八'[idx-1]}、🔥概念热榜(题材维度)</h2>"
+                     "<div class='note' style='color:#f0a35a;border-color:#c8792e'>概念是题材聚合,与行业分类互补;"
+                     "已滤除融资融券/沪股通类名单式伪概念及成分>上限的指数化巨型概念,按涨幅取紧凑热题材。</div>"
+                     "<table><thead><tr><th>概念</th><th>涨跌幅</th><th>成分数</th></tr></thead><tbody>")
+        for c in concepts:
+            cls = "up" if c["pct"] >= 0 else "down"; sign = "+" if c["pct"] >= 0 else ""
+            parts.append(f"<tr><td>{c['name']}</td><td class='{cls}'>{sign}{c['pct']:.2f}%</td>"
+                         f"<td>{c.get('size','—')}</td></tr>")
+        parts.append("</tbody></table>"); idx += 1
     if news_md:
-        parts.append(f"<h2>{'一二三四五'[idx-1]}、消息面(联网热点)</h2>{_news_html(news_md)}"); idx += 1
+        parts.append(f"<h2>{'一二三四五六七八'[idx-1]}、消息面(联网热点)</h2>{_news_html(news_md)}"); idx += 1
 
     # 合并热点池 + 全局池,打标签(pool)供下拉区分
     picks = []
@@ -659,11 +680,11 @@ def render(data, global_data=None, news_md=None):
                 f"<div class='spot-kv'>现价 <b>{s['entry']}</b> · 止损 <b>{ss.get('stop','—')}</b>({ss.get('basis','')})"
                 f" · 盈亏比 <b class='{tcls}'>{rr.get('rr','—')}:1</b> · {rr.get('verdict','')}</div>"
                 f"<div class='spot-rz'>关键:{reason};介入 {j.get('entry','—')}</div></div>")
-        parts.append(f"<h2>{'一二三四五'[idx-1]}、今日之选(按机会质量·风险收益比排序)</h2>"
+        parts.append(f"<h2>{'一二三四五六七八'[idx-1]}、今日之选(按机会质量·风险收益比排序)</h2>"
                      "<div class='note'>聚焦最值得看的标的:综合盈亏比、板块相对强度、指标矛盾扣分。质量高≠必涨,仅代表当前结构与风险收益相对占优。</div>"
                      "<div class='spots'>" + "".join(cards) + "</div>")
         idx += 1
-    parts.append(f"<h2>{'一二三四五'[idx-1]}、个股详析({cnt},下拉切换)</h2>")
+    parts.append(f"<h2>{'一二三四五六七八'[idx-1]}、个股详析({cnt},下拉切换)</h2>")
     if not stocks:
         parts.append("<p>无入池标的。</p>")
     else:

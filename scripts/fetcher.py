@@ -174,6 +174,17 @@ def get_sector_cons(sector) -> pd.DataFrame:
     return _cached(f"sector_cons:{src}:{key}", live)
 
 
+def get_concept_rank() -> pd.DataFrame:
+    """概念板块排名(同花顺概念,方案C)。固定走 DangInvest —— 东财概念 clist 与行业
+    clist 同源同样限流,而 DangInvest 概念是其强项,不受东财限流影响。"""
+    return _cached("concept_rank", lambda: _call(danginvest.board_summary, mode="concept"))
+
+
+def get_concept_cons(key: str) -> pd.DataFrame:
+    """概念成分股(DangInvest concept 模式)。key 为概念榜的 _key(groupKey)。"""
+    return _cached(f"concept_cons:{key}", lambda: _call(danginvest.board_cons, key, mode="concept"))
+
+
 def _to_sina_symbol(code: str) -> str:
     """6 位代码 → 新浪/akshare daily 前缀符号(6/9 开头沪市,余深市;北交所已在上游排除)。"""
     return ("sh" if code[0] in ("6", "9") else "sz") + code
