@@ -1,0 +1,33 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ---------- 本地缓存/数据库 ----------
+data/
+
+# ---------- 个人产出(含个人交易与选股信息,不入库) ----------
+reports/**
+reviews/
+trades/
+portfolio/
+# 例外:离线演示样例(虚构数据,使用说明引用)
+!reports/20260704/
+!reports/20260704/样例日报-离线演示数据.md
+
+# ---------- 版权资料(仅保留蒸馏后的规则文件,原书/提取物不分发) ----------
+knowledge/*.pdf
+knowledge/*.pptx
+knowledge/kb/raw/
+
+# ---------- 运行时生成 ----------
+knowledge/kb/glossary_misses.json
+
+# ---------- 系统/编辑器 ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+.claude/settings.local.json

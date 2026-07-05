@@ -1,0 +1,46 @@
+# A股投资分析助手 — 个人风格配置
+# 修改后无需改代码,daily_report.py 会自动读取
+
+style:
+  trading_style: 短线+波段      # 短线 / 波段 / 中长线(可组合)
+  preference: [题材成长股, 不限看信号]
+  max_drawdown_pct: 8          # 单只个股最大回撤容忍(%),超过即建议止损
+
+filters:                       # 硬性排除(代码层一票否决)
+  exclude_st: true             # ST / *ST 股
+  exclude_sub_new: true       # 上市不满 60 日次新股
+  exclude_bse: true           # 北交所(代码 8/4/92 开头)
+  exclude_chinext: true        # 创业板(代码 300/301 开头)
+  exclude_star: true           # 科创板(代码 688/689 开头,无购买资格则排除)
+
+hard_rules:                    # 信号级硬规则(不剔除,但禁止给"关注"信号)
+  max_bias5_pct: 5             # MA5 乖离率 > 5% 不追高
+  max_rsi6: 80                 # RSI6 > 80 超买不碰
+
+report:
+  top_sectors: 3               # 每日分析涨幅前 N 个板块
+  stocks_per_sector: 5         # 每板块按成交额取前 M 只进候选池
+  min_score: 60                # 进入荐股池的最低评分
+  max_picks: 5                 # 单日荐股池上限(防信息过载)
+  kline_days: 180              # 拉取日K长度
+  chart_bars: 120              # 富HTML K线图展示的最近K线根数
+
+global_scan:                   # 全局扫描(热点板块之外的全市场上升趋势股)
+  universe_ttl_days: 5         # 全市场清单缓存天数(周级刷新,避免每次重拉5000只)
+  scan_cap: 60                 # 预筛后拉K线的候选上限(越大越全但越慢/越易限流)
+  min_60d_return: 10           # (预留)中期涨幅门槛(%)
+  min_score: 65                # 趋势追涨路的入池评分门槛
+  max_picks: 8                 # 每一路(趋势/超跌)的上限
+  oversold_rsi: 35             # 超跌回调路:RSI6 ≤ 此值视为超卖
+  oversold_bias: -8            # 超跌回调路:MA5乖离 ≤ 此值视为深度负乖离
+  rps_min: 85                  # 趋势路:全市场60日涨幅百分位RPS≥此值(欧奈尔,需东财spot的60日字段)
+  event_filter: true           # 第三梯队:盘前拉解禁/业绩雷黑名单剔除
+  event_days_ahead: 14         # 未来N天内大额解禁纳入黑名单
+  unlock_ratio_pct: 3.0        # 解禁占流通市值 > 此% 视为大额
+
+data:
+  request_interval_sec: 1.0    # 接口调用间隔(秒),实际会 +0~50% 随机抖动;防限流
+  max_retries: 2               # 单接口重试次数(压低:限流时靠缓存兜底,不狂重试续封禁)
+  freshness_max_age_days: 4    # 数据超过 N 天视为过期,拒绝出结论(缓存陈旧数据在此被拦)
+  prefer_source: danginvest    # 板块数据主源:danginvest(避开东财限流,推荐) / eastmoney(全,含领涨股)。失败自动互备
+  danginvest_mode: industry    # DangInvest 板块维度:industry申万大类 / sub同花顺细分 / concept概念
