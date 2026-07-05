@@ -569,7 +569,47 @@ def _news_html(md: str) -> str:
     return "<div class='news'>" + "".join(out) + "</div>"
 
 
-def render(data, global_data=None, news_md=None):
+def _action_plan_html(ap: dict) -> str:
+    """作战方案卡片:组合姿态 + 持仓动作 + 荐股动作 + 换股。"""
+    if not ap:
+        return ""
+    po = ap.get("posture") or {}
+    acls = {"进攻": "act-bull", "谨慎": "act-neutral", "防守": "act-bear"}.get(po.get("regime_level"), "act-neutral")
+    h = [f"<div class='action {acls}'><div class='act-hd'>🎯 今日作战方案(研究性组合研判 · 非喊单 · 均绑事先算好的计划价位)</div>",
+         f"<div class='act-main'>{po.get('note','')}</div>"]
+    extra = []
+    if po.get("position_pct") is not None:
+        extra.append(f"当前仓位 {po['position_pct']}%")
+    if po.get("concentration_warn"):
+        extra.append("⚠️ " + po["concentration_warn"])
+    if extra:
+        h.append(f"<div class='act-sec con'>{' · '.join(extra)}</div>")
+
+    def _tbl(title, rows, headers, keys):
+        if not rows:
+            return ""
+        th = "".join(f"<th>{x}</th>" for x in headers)
+        trs = []
+        for r in rows:
+            tds = "".join(f"<td>{r.get(k, '') if r.get(k) is not None else '—'}</td>" for k in keys)
+            trs.append(f"<tr>{tds}</tr>")
+        return (f"<div style='margin-top:8px'><b>{title}</b></div>"
+                f"<table><thead><tr>{th}</tr></thead><tbody>{''.join(trs)}</tbody></table>")
+
+    h.append(_tbl("持仓端",
+                  [{**x, "cp": f"{x.get('cost')}/{x.get('price')}"} for x in ap.get("holdings", [])],
+                  ["股票", "成本/现价", "盈亏%", "动作", "触发价", "幅度", "依据"],
+                  ["name", "cp", "pnl_pct", "action", "trigger", "ratio", "note"]))
+    h.append(_tbl("荐股端", ap.get("pool", []),
+                  ["股票", "池", "动作", "计划价", "止损", "目标", "盈亏比", "依据"],
+                  ["name", "pool", "action", "plan_price", "stop", "target", "rr", "note"]))
+    if ap.get("swaps"):
+        h.append("<div class='act-sec'>🔁 换股:" + ";".join(s["note"] for s in ap["swaps"]) + "</div>")
+    h.append("<div class='act-dis'>动作由代码据 judge 计划价位合成;仅供研究,请自行复核,不构成投资建议、不代下单。</div></div>")
+    return "".join(h)
+
+
+def render(data, global_data=None, news_md=None, action_plan=None):
     date = data.get("date", "")
     src = data.get("source", "")
     is_stock_only = src in ("点名分析", "全局扫描") and not global_data
@@ -596,6 +636,8 @@ def render(data, global_data=None, news_md=None):
                      f"<div class='act-sec'>涨停{emo.get('zt_count')}家 · 炸板率{emo.get('break_rate')}% · "
                      f"最高{emo.get('max_height')}连板 · 梯队 {ladder} · 晋级率{prom} · 昨停溢价{prem}{turning}"
                      f" —— {emo.get('note','')}</div></div>")
+    if action_plan:
+        parts.append(_action_plan_html(action_plan))
     idx = 1
     if not is_stock_only and data.get("indexes"):
         parts.append(f"<h2>{'一二三四五六七八'[idx-1]}、大盘</h2><table><thead><tr><th>指数</th><th>收盘</th><th>涨跌幅</th><th>日期</th></tr></thead><tbody>")
@@ -735,6 +777,7 @@ def main():
     ap.add_argument("input", help="日报/点名 侧车 JSON")
     ap.add_argument("--global", dest="glob", help="全局池侧车 JSON(合并展示)")
     ap.add_argument("--news", help="消息面 Markdown(合并展示)")
+    ap.add_argument("--action-plan", dest="action", help="作战方案 JSON(顶部卡片)")
     ap.add_argument("-o", "--output")
     args = ap.parse_args()
     src = Path(args.input)
@@ -747,8 +790,11 @@ def main():
     news = None
     if args.news and Path(args.news).exists():
         news = Path(args.news).read_text(encoding="utf-8")
+    action = None
+    if args.action and Path(args.action).exists():
+        action = json.loads(Path(args.action).read_text(encoding="utf-8"))
     out = Path(args.output) if args.output else src.with_name(src.stem + "-图表版.html")
-    out.write_text(render(data, gdata, news), encoding="utf-8")
+    out.write_text(render(data, gdata, news, action), encoding="utf-8")
     print(f"完成 → {out}")
 
 

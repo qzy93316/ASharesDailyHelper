@@ -45,19 +45,33 @@ def main():
     global_json = day_dir / f"全局池-{date}.json"
     out_html = day_dir / f"盘前报告-{date}.html"
     news_md = day_dir / "news.md"
+
+    # 有持仓文件则先诊断持仓(供作战方案统筹持仓+荐股)
+    port_files = [f for f in (ROOT / "portfolio").glob("*.*")
+                  if f.suffix.lower() in (".xls", ".xlsx", ".csv")]
+    if port_files:
+        _run("持仓诊断 · diagnose_portfolio(读 portfolio/ 最新持仓文件)",
+             ["scripts/diagnose_portfolio.py"])
+    # 作战方案:统筹 持仓+荐股池 → 组合动作(读侧车,不联网)
+    _run("作战方案 · action_plan(持仓/荐股 组合动作 + 计划价位)",
+         ["scripts/action_plan.py", "--date", date])
+    action_json = day_dir / f"作战方案-{date}.json"
+
     if pools_only:
-        print(f"\n{'='*54}\n✅ 两池完成(--pools-only,未渲染)\n"
+        print(f"\n{'='*54}\n✅ 两池+作战方案完成(--pools-only,未渲染)\n"
               f"   下一步:把消息面写入 {news_md},再跑本脚本渲染完整版。\n{'='*54}")
         return
     render_args = ["skills/render-html/scripts/report_to_html.py", str(daily_json), "-o", str(out_html)]
     if global_json.exists():
         render_args += ["--global", str(global_json)]
+    if action_json.exists():
+        render_args += ["--action-plan", str(action_json)]
     if news_md.exists():
         render_args += ["--news", str(news_md)]
     if not daily_json.exists():
         print(f"\n⚠️ 找不到 {daily_json},无法渲染。请检查上面步骤日志。")
         return
-    _run("[3/3] 合并渲染 · 盘前报告(大盘+板块强弱榜+今日之选+个股详析)", render_args)
+    _run("合并渲染 · 盘前报告(作战方案+大盘+板块强弱榜+今日之选+个股详析)", render_args)
 
     news_note = ("消息面已并入。" if news_md.exists()
                  else "本次为纯技术面版;对我说「今日热点」补消息面后会自动重渲染并入。")
