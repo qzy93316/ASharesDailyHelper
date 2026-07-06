@@ -42,10 +42,17 @@ description: A股荐股池盘后/周度复盘验证 —— 用上一交易日荐
 
 ## 用法
 
-脚本:`skills/backtest-review/scripts/review.py`(依赖主项目 scripts,已自动接入)
+**用户说「复盘/盘后复盘」→ 一键脚本 `scripts/run_review.py`**(荐股维度 + 持仓维度**同时触发**,
+无需再单独说「诊断持仓」),它依次跑:① `review.py daily`(荐股维度三池)→ ② `diagnose_portfolio.py`
+(持仓维度,有 portfolio/ 持仓文件才跑)→ ③ `review_to_html.py` 合成**暗色图文 HTML**(复用盘前报告
+主题、宽表;两维度分两模块展示、互不污染)。作战方案**不在复盘出**(留给次日盘前工作流)。
 
 ```bash
-# 盘后复盘上一交易日决策(默认 hold=1 只看次日;三池合验)
+# 一键盘后复盘(荐股维度 + 持仓维度 → 合成 HTML)—— 推荐
+python scripts/run_review.py 2026-07-06            # 指定日期;不带则今天
+python scripts/run_review.py 2026-07-06 --hold 5   # 波段视角
+
+# 分步(需要时):仅荐股维度
 python skills/backtest-review/scripts/review.py daily --date 2026-07-06
 
 # 波段视角(看 5 日)
@@ -58,7 +65,8 @@ python skills/backtest-review/scripts/review.py range --since 2026-06-30 --until
 python skills/backtest-review/scripts/review.py stats
 ```
 
-- 复盘结果写到 `reviews/复盘-*.md`(可用 render-html 转成图文HTML)
+- 复盘结果写到 `reviews/复盘-*.md` + 侧车 `reviews/复盘-*.json`;`run_review.py` 自动用
+  `review_to_html.py` 合成暗色图文 HTML(荐股维度 + 持仓维度两模块)
 - 每次验证追加到累积台账 `reviews/review_ledger.jsonl`(按 日期+代码 去重),`stats` 据此算长期命中率
 - **依赖侧车**:复盘读取 `reports/日报-YYYY-MM-DD.json`(由 daily_report 生成);当天荐股需等之后有交易日才可验证,否则标「待验证」
 

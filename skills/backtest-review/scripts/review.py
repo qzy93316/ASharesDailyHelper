@@ -235,8 +235,12 @@ def cmd_daily(args) -> None:
     summ = _summary(rows)
     _append_ledger(rows)
     out = _write_md(f"复盘-{args.date}", rows, summ, args.hold)
-    print(json.dumps({"summary": summ, "by_pool": _by_pool(rows), "md": str(out)},
-                     ensure_ascii=False, indent=2))
+    sc = REVIEWS / f"复盘-{args.date}.json"   # 侧车:供 review_to_html 渲染暗色图文版
+    sc.write_text(json.dumps({"date": args.date, "hold": args.hold, "summary": summ,
+                              "by_pool": _by_pool(rows), "rows": rows},
+                             ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps({"summary": summ, "by_pool": _by_pool(rows),
+                      "md": str(out), "sidecar": str(sc)}, ensure_ascii=False, indent=2))
 
 
 def cmd_range(args) -> None:

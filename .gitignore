@@ -20,9 +20,6 @@ knowledge/*.pdf
 knowledge/*.pptx
 knowledge/kb/raw/
 
-# ---------- 运行时生成 ----------
-knowledge/kb/glossary_misses.json
-
 # ---------- 系统/编辑器 ----------
 .DS_Store
 Thumbs.db
