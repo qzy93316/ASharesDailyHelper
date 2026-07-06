@@ -305,6 +305,7 @@ color:#cdd6e4;box-shadow:0 6px 20px rgba(0,0,0,.5);white-space:normal;font-weigh
 .ap-note{font-size:11.5px;color:var(--muted);line-height:1.6;margin-bottom:5px}
 .ap-note b{color:#c3cee0}
 td.gold{color:var(--gold);font-weight:600}
+.ap-code{color:var(--muted);font-size:.82em;font-weight:400;margin-left:5px;font-family:Consolas,Menlo,monospace}
 /* 消息面:卡片化,与上下 block 视觉统一 */
 .news{margin:1em 0;display:flex;flex-direction:column;gap:10px}
 .news h3{display:none}
@@ -637,6 +638,11 @@ def _action_plan_html(ap: dict) -> str:
     if extra:
         h.append(f"<div class='act-sec con'>{' · '.join(extra)}</div>")
 
+    def _name_code(r):
+        n = r.get("name") or ""
+        c = r.get("code")
+        return f"{n}<span class='ap-code'>{c}</span>" if c else n
+
     def _tbl(title, rows, headers, keys, cls_map=None, note=None):
         if not rows:
             return ""
@@ -659,23 +665,23 @@ def _action_plan_html(ap: dict) -> str:
     hrows = []
     for x in ap.get("holdings", []):
         trig, dist = x.get("trigger"), x.get("dist_to_trigger")
-        hrows.append({**x, "cp": f"{x.get('cost')}/{x.get('price')}",
+        hrows.append({**x, "name_code": _name_code(x), "cp": f"{x.get('cost')}/{x.get('price')}",
                       "mkt": (f"{round(x['mktval'])}" if x.get("mktval") else "—"),
                       "trig_disp": (f"{trig} ({dist:+}%)" if trig and dist is not None else (trig or "—")),
                       "ratio_disp": (x.get("ratio") if x.get("ratio") not in (None, "—") else "—")})
     h.append(_tbl(
         "持仓端(结合成本的加/减/守)", hrows,
         ["股票", "成本/现价", "盈亏%", "市值", "动作", "触发价(距现价)", "止损", "建议比例", "依据"],
-        ["name", "cp", "pnl_pct", "mkt", "action", "trig_disp", "stop", "ratio_disp", "note"],
+        ["name_code", "cp", "pnl_pct", "mkt", "action", "trig_disp", "stop", "ratio_disp", "note"],
         cls_map={"pnl_pct": lambda r: "up" if (r.get("pnl_pct") or 0) >= 0 else "down",
                  "action": "gold"},
         note=("<b>触发价</b>=到该价位就执行动作(减/加/清),括号是现价到触发价的距离;"
               "<b>止损</b>=结构化止损线,跌破离场;<b>建议比例</b>=该动作占该股持仓的仓位比例"
               "(如 1/3=减/加三分之一,≤1/3=最多加三分之一,100%=清空,—=持有不动)。")))
     h.append(_tbl(
-        "荐股端(新标的建/低吸/突破)", ap.get("pool", []),
+        "荐股端(新标的建/低吸/突破)", [{**p, "name_code": _name_code(p)} for p in ap.get("pool", [])],
         ["股票", "池", "动作", "计划价", "止损", "目标", "盈亏比", "依据"],
-        ["name", "pool", "action", "plan_price", "stop", "target", "rr", "note"],
+        ["name_code", "pool", "action", "plan_price", "stop", "target", "rr", "note"],
         cls_map={"action": "gold", "rr": lambda r: "up" if (r.get("rr") or 0) >= 1.5 else ("down" if (r.get("rr") or 0) < 1 else "")},
         note="<b>计划价</b>=挂单参考价(回踩介入/突破确认);<b>盈亏比</b>=(目标−现价)/(现价−止损),≥1.5 值博、<1 不值博。"))
     if ap.get("swaps"):

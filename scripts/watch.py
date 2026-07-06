@@ -172,6 +172,11 @@ def write_chart(date: str, series: dict, snaps: dict, wl: list[dict], alerts_log
     (ROOT / "reports" / day / "盘中监控-分时.html").write_text(html, encoding="utf-8")
 
 
+def _bucket(now: dt.datetime) -> str:
+    """半小时时间桶(HH-A=前半 / HH-B=后半),用于告警额度按半小时滚动重置。"""
+    return f"{now:%H}-{'A' if now.minute < 30 else 'B'}"
+
+
 def run(date: str, interval: int, once: bool, cfg: dict) -> None:
     wc = cfg.get("watch", {}) or {}
     max_per = int(wc.get("max_alerts_per_type", 3))
@@ -180,8 +185,9 @@ def run(date: str, interval: int, once: bool, cfg: dict) -> None:
     wl = build_watchlist(date)
     codes = [it["code"] for it in wl]
     print(f"监控 {len(codes)} 只:{', '.join(it['name'] for it in wl)}")
-    print(f"轮询 {interval}s · 交易时段限制 {'开' if th_only else '关'} · 告警只绑计划价位\n")
-    fired: dict = {}          # (code,label) → 次数
+    print(f"轮询 {interval}s · 交易时段限制 {'开' if th_only else '关'} · 告警只绑计划价位 · "
+          f"每股每类每半小时最多 {max_per} 次(滚动重置)\n")
+    fired: dict = {}          # (code,label,半小时桶) → 次数;每半小时滚动重置额度
     zt_state: dict = {}       # code → 是否处于涨停(判炸板)
     series: dict = {}         # code → [{t,p}]
     alerts_log: list = []
@@ -203,30 +209,45 @@ def run(date: str, interval: int, once: bool, cfg: dict) -> None:
             series.setdefault(code, []).append({"t": ts, "p": price})
             # 触价告警(计划价位,带缓冲)
             for lv in it["levels"]:
-                key = (code, lv["label"])
-                if fired.get(key, 0) >= max_per:
-                    continue
                 hit = (price <= lv["price"] * (1 + near) if lv["dir"] == "down"
                        else price >= lv["price"] * (1 - near))
-                if hit:
-                    fired[key] = fired.get(key, 0) + 1
-                    _emit(alerts_log, now, lv["type"], name, code, price, lv["label"])
+                if not hit:
+                    continue
+                # 日志额度:每股每类每半小时 max_per 次(防 20s 刷屏,每类仍留痕)
+                lkey = (code, lv["label"], _bucket(now))
+                if fired.get(lkey, 0) >= max_per:
+                    continue
+                fired[lkey] = fired.get(lkey, 0) + 1
+                # 弹窗额度:每股每半小时 max_per 次(合并所有类型),超出只记录不弹窗
+                pkey = ("POP", code, _bucket(now))
+                popup = fired.get(pkey, 0) < max_per
+                if popup:
+                    fired[pkey] = fired.get(pkey, 0) + 1
+                _emit(alerts_log, now, lv["type"], name, code, price, lv["label"], popup)
             # 涨停/炸板(现算)
             lu = s.get("limit_up")
             if lu:
                 if price >= lu - 0.01:
                     if not zt_state.get(code):
                         zt_state[code] = True
-                        k = (code, "涨停")
+                        k = (code, "涨停", _bucket(now))
                         if fired.get(k, 0) < max_per:
                             fired[k] = fired.get(k, 0) + 1
-                            _emit(alerts_log, now, "📈涨停", name, code, price, f"封涨停 {lu}")
+                            pkey = ("POP", code, _bucket(now))
+                            popup = fired.get(pkey, 0) < max_per
+                            if popup:
+                                fired[pkey] = fired.get(pkey, 0) + 1
+                            _emit(alerts_log, now, "📈涨停", name, code, price, f"封涨停 {lu}", popup)
                 elif zt_state.get(code):  # 曾涨停,现开板 = 炸板
                     zt_state[code] = False
-                    k = (code, "炸板")
+                    k = (code, "炸板", _bucket(now))
                     if fired.get(k, 0) < max_per:
                         fired[k] = fired.get(k, 0) + 1
-                        _emit(alerts_log, now, "💥炸板", name, code, price, f"涨停开板(涨停价{lu})")
+                        pkey = ("POP", code, _bucket(now))
+                        popup = fired.get(pkey, 0) < max_per
+                        if popup:
+                            fired[pkey] = fired.get(pkey, 0) + 1
+                        _emit(alerts_log, now, "💥炸板", name, code, price, f"涨停开板(涨停价{lu})", popup)
         try:
             write_chart(date, series, snaps, wl, alerts_log)
         except Exception as e:  # noqa: BLE001
@@ -236,18 +257,19 @@ def run(date: str, interval: int, once: bool, cfg: dict) -> None:
         time.sleep(interval)
 
 
-def _emit(log, now, atype, name, code, price, detail) -> None:
+def _emit(log, now, atype, name, code, price, detail, popup: bool = True) -> None:
     line = f"{now:%H:%M:%S} {atype} {name}({code}) 现价{price} — {detail}"
-    print("  🔔 " + line)
+    print(("  🔔 " if popup else "  📝 ") + line + ("" if popup else "  [超弹窗额度·仅记录]"))
     log.append(f"{now:%H:%M} {atype}{name} {price}")
-    notify_desktop(f"{atype} {name}", f"{name}({code}) 现价{price}\n{detail}\n(计划价位告警·非喊单)")
-    # 落告警日志
+    if popup:  # 弹窗额度内才桌面弹窗;超额只落日志/控制台
+        notify_desktop(f"{atype} {name}", f"{name}({code}) 现价{price}\n{detail}\n(计划价位告警·非喊单)")
+    # 落告警日志(无论是否弹窗,均记录以便追溯)
     day = now.strftime("%Y%m%d")
     logf = ROOT / "reports" / day / "盘中告警.log"
     try:
         logf.parent.mkdir(parents=True, exist_ok=True)
         with logf.open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
+            f.write(line + ("" if popup else "  [仅记录]") + "\n")
     except Exception:  # noqa: BLE001
         pass
 
