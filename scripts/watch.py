@@ -2,7 +2,11 @@
 """盘中监控 watch.py —— 独立循环,盯 持仓+荐股池,价格触及作战方案里事先算好的计划价位时
 桌面弹窗提醒。绕过当日缓存(直接批量快照),只在交易时段轮询。
 
-数据:腾讯行情 qt.gtimg.cn 批量快照(现价/昨收/涨跌幅/涨停价/跌停价,不封IP)。
+数据:
+  · 告警 —— 腾讯 qt.gtimg.cn 批量快照(现价/昨收/涨跌幅/涨停价/跌停价),每轮拉,不封IP。
+  · 分时图 —— 腾讯 ifzq.gtimg.cn 全天分时(每分钟价+累计量),每分钟拉一次,落地
+    reports/<日期>/分时缓存.json。拿的是当日 9:30→当前整段,与启动时间无关,
+    重启不丢前半段;拉取失败自动沿用磁盘缓存。
 告警(只绑事先写好的计划价位,不做盘中临时喊单):
   ⛔止损   跌破结构止损
   🎯介入   触及建仓/逢低吸/回踩加仓价(下行到位)
@@ -61,6 +65,62 @@ def snapshot(codes: list[str]) -> dict:
         out[code] = {"name": v[1], "price": f(3), "prev_close": f(4), "pct": f(32),
                      "limit_up": f(47), "limit_down": f(48)}
     return out
+
+
+def fetch_minute(codes: list[str]) -> dict:
+    """腾讯全天分时:{code: [{t, p, cvol}]}。一次返回当日 9:30 至当前每分钟的
+    价格与**累计成交量**(手),与本脚本启动时间无关 —— 这是分时图完整性的关键:
+    无论几点启动、重启几次,拉到的都是从开盘起的整段。cvol 由上层差分成量柱。
+    行:"HHMM 价 累计量 累计额"。逐只请求(每分钟仅拉一次,不加请求压力)。"""
+    out = {}
+    for c in codes:
+        c = str(c).zfill(6)
+        pre = ("sh" if c[0] in ("6", "9") else "bj" if c[0] in ("8", "4") else "sz") + c
+        try:
+            r = fetcher._cf_request_with_retry(
+                "https://web.ifzq.gtimg.cn/appstock/app/minute/query",
+                params={"code": pre}, timeout=10)
+            node = json.loads(r.text)["data"][pre]["data"]
+            rows = []
+            for ln in node.get("data", []):
+                fld = ln.split()
+                if len(fld) < 3:
+                    continue
+                hhmm = fld[0]
+                try:
+                    rows.append({"t": hhmm[:2] + ":" + hhmm[2:],
+                                 "p": float(fld[1]), "cvol": float(fld[2])})
+                except ValueError:
+                    continue
+            if rows:
+                out[c] = rows
+        except Exception:  # noqa: BLE001
+            continue  # 单只失败不影响其余;本轮无新数据则沿用磁盘缓存
+    return out
+
+
+def _cache_path(date: str) -> Path:
+    return ROOT / "reports" / date.replace("-", "") / "分时缓存.json"
+
+
+def load_series_cache(date: str) -> dict:
+    """开机先读当日分时缓存 —— 即使首次拉取前、或收盘后回看,也有完整图形。"""
+    p = _cache_path(date)
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            return {}
+    return {}
+
+
+def save_series_cache(date: str, series: dict) -> None:
+    p = _cache_path(date)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(series, ensure_ascii=False), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def build_watchlist(date: str) -> list[dict]:
@@ -141,18 +201,25 @@ CHART_TMPL = """<!doctype html><html><head><meta charset="utf-8">
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 <style>body{{margin:0;background:#0d1420;color:#d5dced;font:14px "Microsoft YaHei",sans-serif}}
 h2{{padding:10px 16px;margin:0}} .g{{display:flex;flex-wrap:wrap}}
-.c{{width:480px;height:240px;margin:8px}} .hd{{padding:4px 12px;color:#9fb0cc}}
+.c{{width:480px;height:300px;margin:8px}} .hd{{padding:4px 12px;color:#9fb0cc}}
 .up{{color:#f6465d}}.down{{color:#2ebd85}} .al{{padding:2px 12px;color:#f0b429}}</style></head>
 <body><h2>🖥️ 盘中监控 · {date} <span class="hd">更新 {updated}(每{refresh}秒自刷新)· 研究提醒,非喊单</span></h2>
 <div class="al">{alerts}</div><div class="g" id="g"></div>
 <script>var D={data};
 D.forEach(function(s){{var el=document.createElement('div');el.className='c';el.id='c_'+s.code;
 document.getElementById('g').appendChild(el);var ch=echarts.init(el);
+var T=s.series.map(function(p){{return p.t;}});
 var lvl=s.levels.map(function(l){{return {{yAxis:l.price,label:{{formatter:l.type+l.price,color:'#f0b429',position:'insideEndTop'}},lineStyle:{{color:'#f0b429',type:'dashed'}}}};}});
 ch.setOption({{title:{{text:s.name+' '+s.code+'  '+(s.price||'-')+'  '+(s.pct>=0?'+':'')+(s.pct||0)+'%',textStyle:{{color:s.pct>=0?'#f6465d':'#2ebd85',fontSize:13}}}},
-grid:{{left:44,right:16,top:30,bottom:20}},xAxis:{{type:'category',data:s.series.map(function(p){{return p.t;}}),axisLabel:{{color:'#7a869c'}}}},
-yAxis:{{scale:true,axisLabel:{{color:'#7a869c'}},splitLine:{{lineStyle:{{color:'#25324a'}}}}}},
-series:[{{type:'line',data:s.series.map(function(p){{return p.p;}}),showSymbol:false,lineStyle:{{color:'#4c8dff'}},markLine:{{symbol:'none',data:lvl}}}}]}});}});
+tooltip:{{trigger:'axis',axisPointer:{{link:[{{xAxisIndex:'all'}}]}},backgroundColor:'#1b2536',borderColor:'#25324a',textStyle:{{color:'#d5dced'}}}},
+axisPointer:{{link:[{{xAxisIndex:'all'}}]}},
+grid:[{{left:48,right:12,top:28,height:150}},{{left:48,right:12,top:200,height:64}}],
+xAxis:[{{type:'category',gridIndex:0,data:T,boundaryGap:false,axisLabel:{{show:false}},axisLine:{{lineStyle:{{color:'#25324a'}}}}}},
+{{type:'category',gridIndex:1,data:T,axisLabel:{{color:'#7a869c',fontSize:10}},axisLine:{{lineStyle:{{color:'#25324a'}}}}}}],
+yAxis:[{{scale:true,gridIndex:0,axisLabel:{{color:'#7a869c'}},splitLine:{{lineStyle:{{color:'#25324a'}}}}}},
+{{scale:true,gridIndex:1,splitNumber:2,name:'量(手)',nameTextStyle:{{color:'#7a869c',fontSize:10}},axisLabel:{{color:'#7a869c',fontSize:10}},splitLine:{{show:false}}}}],
+series:[{{name:'现价',type:'line',xAxisIndex:0,yAxisIndex:0,data:s.series.map(function(p){{return p.p;}}),showSymbol:false,lineStyle:{{color:'#4c8dff'}},markLine:{{symbol:'none',data:lvl}}}},
+{{name:'成交量',type:'bar',xAxisIndex:1,yAxisIndex:1,barWidth:'60%',data:s.series.map(function(p){{return {{value:p.v,itemStyle:{{color:p.up?'#f6465d':'#2ebd85'}}}};}})}}]}});}});
 </script></body></html>"""
 
 
@@ -162,9 +229,25 @@ def write_chart(date: str, series: dict, snaps: dict, wl: list[dict], alerts_log
     for it in wl:
         code = it["code"]
         s = snaps.get(code, {})
+        raw = series.get(code, [])
+        # 累计量差分成分时量柱:本柱 = 本分钟末累计 − 上一分钟末累计。
+        # 数据来自全天分时(必从 09:30 起),故首柱 = 其自身累计(开盘首分钟量),不再置 0。
+        # 量柱红绿沿用涨跌色:现价 >= 上一分钟现价 记红(涨),否则绿(跌)。
+        ser = []
+        prev_cvol = prev_p = None
+        for pt in raw:
+            cvol, p = pt.get("cvol"), pt.get("p")
+            vol = 0.0
+            if cvol is not None:
+                vol = max(cvol - prev_cvol, 0.0) if prev_cvol is not None else cvol
+            up = prev_p is None or (p is not None and p >= prev_p)
+            ser.append({"t": pt["t"], "p": p, "v": round(vol, 1), "up": 1 if up else 0})
+            if cvol is not None:
+                prev_cvol = cvol
+            if p is not None:
+                prev_p = p
         data.append({"code": code, "name": it["name"], "price": s.get("price"),
-                     "pct": s.get("pct"), "levels": it["levels"],
-                     "series": series.get(code, [])})
+                     "pct": s.get("pct"), "levels": it["levels"], "series": ser})
     html = CHART_TMPL.format(
         date=date, refresh=20, updated=dt.datetime.now().strftime("%H:%M:%S"),
         alerts="　".join(alerts_log[-6:]) or "(暂无告警)",
@@ -189,7 +272,8 @@ def run(date: str, interval: int, once: bool, cfg: dict) -> None:
           f"每股每类每半小时最多 {max_per} 次(滚动重置)\n")
     fired: dict = {}          # (code,label,半小时桶) → 次数;每半小时滚动重置额度
     zt_state: dict = {}       # code → 是否处于涨停(判炸板)
-    series: dict = {}         # code → [{t,p}]
+    series: dict = load_series_cache(date)  # code → [{t,p,cvol}] 全天分时,开机先读缓存
+    last_min: str = ""        # 上次拉分时的分钟,用于每分钟只拉一次
     alerts_log: list = []
     while True:
         now = dt.datetime.now()
@@ -199,14 +283,24 @@ def run(date: str, interval: int, once: bool, cfg: dict) -> None:
             snaps = snapshot(codes)
         except Exception as e:  # noqa: BLE001
             print(f"  {now:%H:%M:%S} 快照失败:{e}"); time.sleep(interval); continue
-        ts = now.strftime("%H:%M")
+        # 分时数据:每分钟拉一次腾讯全天分时(不随快照高频拉,省请求),落地缓存。
+        # 拿全天段而非自攒点 —— 启动/重启都不缺前半段。拉取失败则沿用已有缓存。
+        cur_min = now.strftime("%H:%M")
+        if cur_min != last_min:
+            last_min = cur_min
+            try:
+                fresh = fetch_minute(codes)
+                if fresh:
+                    series.update(fresh)   # 每只用最新全天段整体替换
+                    save_series_cache(date, series)
+            except Exception as e:  # noqa: BLE001
+                print(f"    [分时拉取失败,沿用缓存] {e}")
         for it in wl:
             code, name = it["code"], it["name"]
             s = snaps.get(code)
             if not s or s.get("price") is None:
                 continue
             price = s["price"]
-            series.setdefault(code, []).append({"t": ts, "p": price})
             # 触价告警(计划价位,带缓冲)
             for lv in it["levels"]:
                 hit = (price <= lv["price"] * (1 + near) if lv["dir"] == "down"
