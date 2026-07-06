@@ -1,0 +1,111 @@
+<!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>盘后复盘 2026-01-02(演示)</title><style>
+:root{--up:#f6465d;--down:#2ebd85;--bg:#0d1420;--panel:#141d2e;--panel2:#1b2740;
+--ink:#d5dced;--muted:#7a869c;--line:#25324a;--accent:#4c8dff;--gold:#f0b429}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+font:15px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+.wrap{max-width:1900px;margin:0 auto;padding:20px 2.2vw 60px}
+h1{font-size:23px;margin:.2em 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--accent)}
+h2{font-size:18px;margin:1.2em 0 .5em;padding-left:10px;border-left:4px solid var(--accent)}
+.note{margin:1em 0;padding:10px 14px;background:#20222d;border-left:3px solid var(--gold);border-radius:6px;color:#d9b84a;font-size:13px}
+table{border-collapse:collapse;width:100%;margin:1em 0;background:var(--panel);border-radius:8px;overflow:hidden}
+th,td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--line);font-size:14px}
+th{background:var(--panel2);color:#aebbd4}tr:last-child td{border-bottom:none}
+.up{color:var(--up)}.down{color:var(--down)}
+.ctrl{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0 12px}
+select{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:7px 12px;font-size:15px;font-weight:600}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tab{padding:6px 16px;border-radius:8px;background:var(--panel2);color:var(--muted);cursor:pointer;font-size:14px;border:1px solid var(--line)}
+.tab.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.subctrl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 6px}
+.subctrl .lbl{color:var(--muted);font-size:13px}
+.subsel{padding:4px 8px;font-size:13px;font-weight:500}
+.pbtn{width:26px;height:26px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:15px;line-height:1}
+.pbtn:hover{background:var(--accent);color:#fff}
+.hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.hd .nm{font-size:20px;font-weight:700}.hd .cd{color:var(--muted);font-size:13px}
+.badge{display:inline-block;padding:2px 10px;border-radius:11px;font-size:12.5px;font-weight:600}
+.b-blue{background:#1b3a6b;color:#8fbaff}.b-yellow{background:#5a4a12;color:#f0cd6a}
+.b-gray{background:#2a3550;color:#9fb0d0}.b-red{background:#5a1f2a;color:#ff9aa8}.b-score{background:#26324d;color:#c7d3ea}
+.stats{display:flex;flex-wrap:wrap;background:var(--panel2);border-radius:8px;overflow:hidden;margin-bottom:10px}
+.stat{flex:1 1 10%;min-width:84px;padding:7px 10px;border-right:1px solid var(--line)}
+.stat .sl{display:block;color:var(--muted);font-size:11px}.stat .sv{display:block;font-size:15px;font-weight:600}
+.row{display:flex;gap:14px;flex-wrap:wrap}
+.kwrap{flex:4 1 720px;min-width:360px}
+.kchart{width:100%;height:70vh;min-height:600px}
+.chipchart{flex:1 1 300px;height:70vh;min-height:600px;min-width:260px}
+.flowchart{width:100%;height:230px;margin-top:10px}
+.judge{margin:8px 0 2px;padding:9px 13px;background:var(--panel2);border-radius:7px;font-size:13.5px}
+.judge b{color:var(--gold)}
+.tips{margin:6px 0 0;padding-left:1.1em}.tips li{margin:.24em 0;font-size:13.5px;color:#b9c4da}
+.gl{border-bottom:1px dashed var(--accent);cursor:help;position:relative}
+.gl:hover .tip{display:block}
+.tip{display:none;position:absolute;left:0;bottom:1.6em;z-index:50;width:320px;background:#0b1220;
+border:1px solid var(--accent);border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.6;
+color:#cdd6e4;box-shadow:0 6px 20px rgba(0,0,0,.5);white-space:normal;font-weight:400}
+.tip .t{color:var(--gold);font-weight:700;font-size:13px}
+.tip .e{color:#8fbaff}.tip .u{color:#8ce0c0}
+.action{margin:12px 0 4px;padding:12px 16px;border-radius:10px;border:1px solid var(--line)}
+.act-bull{background:#2a1a1f;border-color:#f6465d}.act-bear{background:#13241d;border-color:#2ebd85}.act-neutral{background:#20222d;border-color:#f0b429}
+.act-hd{font-size:12.5px;color:var(--muted);margin-bottom:3px}
+.act-main{font-size:19px;font-weight:800;margin-bottom:6px}
+.act-bull .act-main{color:#ff9aa8}.act-bear .act-main{color:#8ce0c0}.act-neutral .act-main{color:#f0cd6a}
+.act-sec{font-size:13px;margin:3px 0;color:#c3cee0}.act-sec.con{color:#ffb0b0}
+.act-dis{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.5}
+.jgrid{display:flex;gap:12px;flex-wrap:wrap;margin:8px 0}
+.jcell{flex:1 1 200px;background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+.jcell .jl{display:block;color:var(--muted);font-size:11.5px}
+.jcell .jv{display:block;font-size:18px;font-weight:700;margin:1px 0}
+.jcell .jx{display:block;color:var(--muted);font-size:11.5px}
+.spots{display:flex;gap:14px;flex-wrap:wrap;margin:8px 0}
+.spot{flex:1 1 340px;background:linear-gradient(135deg,#17233a,#141d2e);border:1px solid var(--accent);border-radius:12px;padding:14px 18px}
+.spot-nm{font-size:18px;font-weight:700;display:flex;align-items:center;gap:8px}
+.spot-st{color:var(--gold);font-size:14px;font-weight:600;margin:5px 0}
+.spot-kv{font-size:13px;color:#c3cee0;margin:4px 0}
+.spot-rz{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.5}
+/* 作战方案表格增强 */
+.ap-sub{margin:12px 0 2px;font-size:14px;font-weight:700;color:#f0cd6a}
+.ap-note{font-size:11.5px;color:var(--muted);line-height:1.6;margin-bottom:5px}
+.ap-note b{color:#c3cee0}
+td.gold{color:var(--gold);font-weight:600}
+.ap-code{color:var(--muted);font-size:.82em;font-weight:400;margin-left:5px;font-family:Consolas,Menlo,monospace}
+/* 消息面:卡片化,与上下 block 视觉统一 */
+.news{margin:1em 0;display:flex;flex-direction:column;gap:10px}
+.news h3{display:none}
+.nwcard{background:var(--panel);border-left:3px solid #4c8dff;border-radius:8px;padding:10px 15px;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.nwcard.bull{border-left-color:var(--up)}.nwcard.bear{border-left-color:var(--down)}.nwcard.macro{border-left-color:var(--gold)}
+.nwcard.risk{border-left-color:#ff8a3d;background:#241a15}
+.nw-hd{font-size:15px;font-weight:700;color:#e6edfb;margin-bottom:6px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.nw-row{font-size:13px;margin:4px 0;line-height:1.65;color:#c3cee0}
+.nw-lbl{display:inline-block;min-width:4.6em;color:#8fbaff;font-weight:600}
+.nw-lbl.cat{color:#f0b429}.nw-lbl.nat{color:#a0e0ff}.nw-lbl.cross{color:#8ce0c0}
+.nw-p{font-size:13px;margin:4px 0;line-height:1.65;color:#c3cee0}
+.stkchip{display:inline-block;background:#1f3050;color:#8fbaff;border:1px solid #345;border-radius:4px;
+  padding:0 6px;margin:0 3px 2px 0;font-size:12.5px;font-weight:600;white-space:nowrap}
+.stkchip.star{background:#3a2f14;color:#f0cd6a;border-color:#6b5620}
+.news b{color:#e6edfb}
+.foot{margin-top:2em;color:var(--muted);font-size:12.5px;text-align:center}
+.nochart{color:#ff8a8a;font-size:13px;padding:12px}
+@media(max-width:720px){.kwrap,.chipchart{flex:1 1 100%}.stat{flex:1 1 22%}}
+</style><style>.rv table td,.rv table th{white-space:nowrap}.rv .nm{white-space:nowrap;font-weight:600}.mod-h{margin:26px 0 2px;font-size:20px;font-weight:800;color:#e8eefc;border-left:4px solid var(--gold);padding-left:10px}.mod-sub{color:var(--muted);font-size:13px;margin:2px 0 6px}.cards{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0}.mc{flex:1 1 150px;min-width:130px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px}.mc .k{font-size:12px;color:var(--muted)}.mc .v{font-size:20px;font-weight:800;margin-top:2px}</style></head><body><div class=wrap><h1>盘后复盘 · 2026-01-02(演示)</h1><div class='note'>⚠️ 个人研究工具自动生成,<b>不构成投资建议</b>。荐股维度检验系统荐股决策对错;持仓维度按你的成本诊断健康度。两维度分开看。</div><div class='mod-h'>① 荐股维度复盘</div>
+<div class='mod-sub'>热点池 / 全局池 / 盘中池三池合验 · 持有期次日 · 按荐股当初计划(建仓价/目标/止损)判对错,<b>与你的持仓成本无关</b></div>
+<div class='cards'><div class='mc'><div class='k'>已验证</div><div class='v'>6 只</div></div><div class='mc'><div class='k'>命中率</div><div class='v'>66.7%</div></div><div class='mc'><div class='k'>达标/止损</div><div class='v'>1 / 2</div></div><div class='mc'><div class='k'>次日均收益</div><div class='v'>1.2%</div></div><div class='mc'><div class='k'>均最大浮盈</div><div class='v'>5.1%</div></div><div class='mc'><div class='k'>均最大浮亏</div><div class='v'>-3.0%</div></div></div>
+<div class='mod-sub'>分池命中率:热点池 <b>66.7%</b>(3只) · 全局池 <b>66.7%</b>(3只)</div>
+<div class='rv'><table><thead><tr><th>日期</th><th>池</th><th>名称</th><th>代码</th><th>信号</th><th>评分</th><th>建仓价</th><th>次日%</th><th>持有期%</th><th>最大浮盈%</th><th>最大浮亏%</th><th>结果</th></tr></thead><tbody>
+<tr><td>2026-01-02</td><td>热点池</td><td class='nm'>演示科技</td><td>600001</td><td><span class='badge b-blue'>🔵 关注</span></td><td>74</td><td>20.0</td><td><span class='up'>+2.1%</span></td><td><span class='up'>+2.1%</span></td><td><span class='up'>+6.0%</span></td><td><span class='down'>-1.0%</span></td><td><span class='up'>持有小胜</span></td></tr>
+<tr><td>2026-01-02</td><td>热点池</td><td class='nm'>样例材料</td><td>000002</td><td><span class='badge b-blue'>🔵 关注</span></td><td>71</td><td>35.0</td><td><span class='down'>-8.2%</span></td><td><span class='down'>-8.2%</span></td><td><span class='up'>+0.3%</span></td><td><span class='down'>-8.4%</span></td><td><span class='down'>❌ 止损(先触止损)</span></td></tr>
+<tr><td>2026-01-02</td><td>热点池</td><td class='nm'>范例传媒</td><td>600003</td><td><span class='badge b-blue'>🔵 关注</span></td><td>69</td><td>12.5</td><td><span class='up'>+1.0%</span></td><td><span class='up'>+1.0%</span></td><td><span class='up'>+3.2%</span></td><td><span class='down'>-0.6%</span></td><td><span class='up'>持有小胜</span></td></tr>
+<tr><td>2026-01-02</td><td>全局池</td><td class='nm'>示范新能</td><td>600004</td><td><span class='badge b-gray'>🟢 重点关注</span></td><td>78</td><td>48.0</td><td><span class='up'>+5.4%</span></td><td><span class='up'>+5.4%</span></td><td><span class='up'>+7.8%</span></td><td><span class='down'>-1.2%</span></td><td><span class='up'>✅ 达标(先触目标)</span></td></tr>
+<tr><td>2026-01-02</td><td>全局池</td><td class='nm'>演示医药</td><td>000005</td><td><span class='badge b-yellow'>🟡 持有观察</span></td><td>55</td><td>22.0</td><td><span class='down'>-3.1%</span></td><td><span class='down'>-3.1%</span></td><td><span class='up'>+1.0%</span></td><td><span class='down'>-4.5%</span></td><td><span class='down'>持有小负</span></td></tr>
+<tr><td>2026-01-02</td><td>全局池</td><td class='nm'>样板重工</td><td>600006</td><td><span class='badge b-gray'>⚪ 观望</span></td><td>41</td><td>9.8</td><td><span class='up'>+0.5%</span></td><td><span class='up'>+0.5%</span></td><td><span class='up'>+2.1%</span></td><td><span class='down'>-1.8%</span></td><td><span class='up'>持有小胜</span></td></tr>
+<tr><td>2026-01-02</td><td>全局池</td><td class='nm'>占位电子</td><td>600007</td><td><span class='badge b-gray'>🟢 重点关注</span></td><td>76</td><td>64.0</td><td>—</td><td>—</td><td>—</td><td>—</td><td class='muted'>待验证</td></tr>
+</tbody></table></div><div class='mod-h'>② 持仓维度诊断</div>
+<div class='mod-sub'>按你的<b>实际成本</b>做健康度体检 —— 这是你手上的钱,与上面的荐股对错是两回事。操作以次日盘前作战方案为准。</div>
+<div class='cards'><div class='mc'><div class='k'>持仓</div><div class='v'>4 只</div></div><div class='mc'><div class='k'>市值</div><div class='v'>52800</div></div><div class='mc'><div class='k'>浮盈亏</div><div class='v'>-1240.0(-2.3%)</div></div><div class='mc'><div class='k'>亏损</div><div class='v'>2 只</div></div><div class='mc'><div class='k'>仓位</div><div class='v'>82.0%</div></div><div class='mc'><div class='k'>主力净流出</div><div class='v'>2/4 只</div></div></div>
+<div class='mod-sub'>最大单票 <b>示范新能</b> 占 38.5%</div>
+<div class='rv'><table><thead><tr><th>股票</th><th>代码</th><th>成本</th><th>现价</th><th>盈亏%</th><th>信号</th><th>评分</th><th>结构止损</th><th>诊断</th></tr></thead><tbody>
+<tr><td class='nm'>示范新能</td><td>600004</td><td>45.0</td><td>48.0</td><td><span class='up'>+6.7%</span></td><td><span class='badge b-gray'>🟢 重点关注</span></td><td>78</td><td>44.1</td><td><b>[持有]</b> 结构未破,守结构止损 44.10;跌破离场</td></tr>
+<tr><td class='nm'>演示科技</td><td>600001</td><td>21.0</td><td>20.4</td><td><span class='down'>-2.9%</span></td><td><span class='badge b-blue'>🔵 关注</span></td><td>74</td><td>19.2</td><td><b>[持有观察]</b> 趋势偏弱但主力逆势吸筹,持有观察,严守 19.20</td></tr>
+<tr><td class='nm'>样例材料</td><td>000002</td><td>40.0</td><td>34.0</td><td><span class='down'>-15.0%</span></td><td><span class='badge b-yellow'>🟡 持有观察</span></td><td>52</td><td>33.3</td><td><b>[重亏警戒]</b> 浮亏超止损容忍近1.5倍,反弹优先减亏,不补仓摊低;结构止损 33.30</td></tr>
+<tr><td class='nm'>演示医药</td><td>000005</td><td>23.0</td><td>22.0</td><td><span class='down'>-4.3%</span></td><td><span class='badge b-yellow'>🟡 持有观察</span></td><td>55</td><td>20.9</td><td><b>[观察]</b> 以结构止损 20.90 为纪律线(现价距止损 5.0%)</td></tr>
+</tbody></table></div><div class=foot>A股投资分析助手 · 盘后复盘(荐股维度+持仓维度)· 仅供研究参考,不构成投资建议</div></div></body></html>

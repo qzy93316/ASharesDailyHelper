@@ -1,0 +1,89 @@
+<!DOCTYPE html><html lang=zh-CN><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>样例日报-离线演示数据</title><style>
+:root{--up:#e03131;--down:#2f9e44;--bg:#f7f8fa;--card:#fff;--ink:#1f2933;
+--muted:#66707a;--line:#e5e8ec;--accent:#1971c2}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+font:16px/1.7 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:32px 20px 64px}
+h1{font-size:28px;margin:.2em 0 .6em;padding-bottom:.3em;border-bottom:3px solid var(--accent)}
+h2{font-size:22px;margin:1.6em 0 .6em;padding-left:12px;border-left:5px solid var(--accent)}
+h3{font-size:18px;margin:0 0 .4em}
+blockquote{margin:1em 0;padding:12px 16px;background:#fff8e1;border-left:4px solid #f59f00;
+border-radius:6px;color:#8a6d00;font-size:14px}
+table{border-collapse:collapse;width:100%;margin:1em 0;background:var(--card);
+border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--line);font-size:15px}
+th{background:#eef2f6;font-weight:600}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#f4f9ff}
+.up{color:var(--up);font-weight:600}.down{color:var(--down);font-weight:600}
+.card{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);
+border-radius:10px;padding:16px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.card ul{margin:.4em 0 0;padding-left:1.2em}.card li{margin:.25em 0;font-size:14.5px}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:13px;
+font-weight:600;margin-left:6px}
+.b-blue{background:#e7f1ff;color:#1971c2}.b-yellow{background:#fff3bf;color:#a67c00}
+.b-gray{background:#eceff2;color:#66707a}.b-red{background:#ffe3e3;color:#e03131}
+ul{padding-left:1.3em}li{margin:.3em 0}
+hr{border:none;border-top:1px dashed var(--line);margin:2em 0}
+code{background:#eceff2;padding:1px 6px;border-radius:4px;font-size:14px}
+.foot{margin-top:2em;color:var(--muted);font-size:13px;text-align:center}
+</style></head><body><div class=wrap><h1>A股每日盘前报告 — 2026-07-04</h1>
+<blockquote>注意:本样例由离线模拟数据生成,仅用于验证流程和展示格式,股票名称与数字均为虚构。</blockquote>
+<blockquote>⚠️ 本报告由个人分析工具自动生成,不构成投资建议。数据来自免费接口,可能有延迟。</blockquote>
+<h2>一、大盘</h2>
+<table><thead><tr><th>指数</th><th>收盘</th><th>涨跌幅</th><th>数据日期</th></tr></thead><tbody>
+<tr><td>上证指数</td><td>3456.78</td><td><span class="up">+0.85%</span></td><td>2026-07-03</td></tr>
+<tr><td>深证成指</td><td>11234.56</td><td><span class="up">+1.12%</span></td><td>2026-07-03</td></tr>
+<tr><td>创业板指</td><td>2345.67</td><td><span class="up">+1.58%</span></td><td>2026-07-03</td></tr>
+</tbody></table>
+<h2>二、强势板块</h2>
+<table><thead><tr><th>板块</th><th>涨跌幅</th><th>领涨股</th></tr></thead><tbody>
+<tr><td>半导体</td><td><span class="up">+3.42%</span></td><td>示例股A</td></tr>
+<tr><td>光模块(CPO)</td><td><span class="up">+2.98%</span></td><td>示例股B</td></tr>
+<tr><td>创新药</td><td><span class="up">+2.15%</span></td><td>示例股C</td></tr>
+</tbody></table>
+<h2>三、消息面(待 Claude 联网补充)</h2>
+<h2>四、技术面荐股池(扫描 12 只,入池 3 只)</h2>
+<div class="card"><h3>演示股一(600001) — 🟢 重点关注 评分 75/100</h3><ul>
+<li><strong>所属板块</strong>:半导体(<span class="up">+3.42%</span>)</li>
+<li><strong>现价</strong>:14.32(<span class="up">+1.17%</span>)|最新数据 2026-07-03(距今1天)</li>
+<li><strong>技术面</strong>:多头排列;MACD 空头持续(零轴上);RSI6=62.0;量比0.78(量能正常);MA5乖离0.2%</li>
+<li><strong>评分明细</strong>:趋势30 / 乖离率20 / MACD4 / 量能8 / RSI3 / 支撑10</li>
+<li><strong>操作参考</strong>:支撑 13.64 / 压力 14.62;止损 14.09(MA20 与 <span class="down">-8%</span> 取高者)</li>
+<li><strong>反方理由(必读)</strong>:板块若高开低走则热点属一日游,信号失效; 若收盘跌破 MA10(14.27)则短线趋势转弱</li>
+<li><strong>同花顺自查</strong>:个股K线页,主图默认显示 MA5/10/20/60;数字键可切换周期;个股页副图默认第一个指标;或输入 MACD 回车切换;F10 检查:F10 →『股本结构』→ 限售解禁,近期大额解禁是利空</li>
+</ul></div>
+<div class="card"><h3>演示股五(300001) — 🟢 重点关注 评分 75/100</h3><ul>
+<li><strong>所属板块</strong>:半导体(<span class="up">+3.42%</span>)</li>
+<li><strong>现价</strong>:14.32(<span class="up">+1.17%</span>)|最新数据 2026-07-03(距今1天)</li>
+<li><strong>技术面</strong>:多头排列;MACD 空头持续(零轴上);RSI6=62.0;量比0.78(量能正常);MA5乖离0.2%</li>
+<li><strong>评分明细</strong>:趋势30 / 乖离率20 / MACD4 / 量能8 / RSI3 / 支撑10</li>
+<li><strong>操作参考</strong>:支撑 13.64 / 压力 14.62;止损 14.09(MA20 与 <span class="down">-8%</span> 取高者)</li>
+<li><strong>反方理由(必读)</strong>:板块若高开低走则热点属一日游,信号失效; 若收盘跌破 MA10(14.27)则短线趋势转弱</li>
+<li><strong>同花顺自查</strong>:个股K线页,主图默认显示 MA5/10/20/60;数字键可切换周期;个股页副图默认第一个指标;或输入 MACD 回车切换;F10 检查:F10 →『股本结构』→ 限售解禁,近期大额解禁是利空</li>
+</ul></div>
+<div class="card"><h3>演示股四(688001) —  关注 评分 74/100 <span class="badge b-blue">🔵</span></h3><ul>
+<li><strong>所属板块</strong>:半导体(<span class="up">+3.42%</span>)</li>
+<li><strong>现价</strong>:14.08(<span class="down">-0.46%</span>)|最新数据 2026-07-03(距今1天)</li>
+<li><strong>技术面</strong>:多头排列;MACD 死叉(零轴上);RSI6=52.9;量比0.78(量能正常);MA5乖离<span class="down">-0.31%</span></li>
+<li><strong>评分明细</strong>:趋势30 / 乖离率20 / MACD0 / 量能8 / RSI6 / 支撑10</li>
+<li><strong>操作参考</strong>:支撑 13.41 / 压力 14.42;止损 13.93(MA20 与 <span class="down">-8%</span> 取高者)</li>
+<li><strong>反方理由(必读)</strong>:板块若高开低走则热点属一日游,信号失效; 若收盘跌破 MA10(14.11)则短线趋势转弱</li>
+<li><strong>同花顺自查</strong>:个股K线页,主图默认显示 MA5/10/20/60;数字键可切换周期;个股页副图默认第一个指标;或输入 MACD 回车切换;F10 检查:F10 →『股本结构』→ 限售解禁,近期大额解禁是利空</li>
+</ul></div>
+<h2>五、同花顺指标速查表</h2>
+<table><thead><tr><th>项目</th><th>查看方法</th></tr></thead><tbody>
+<tr><td>均线</td><td>个股K线页,主图默认显示 MA5/10/20/60;数字键可切换周期</td></tr>
+<tr><td>MACD</td><td>个股页副图默认第一个指标;或输入 MACD 回车切换</td></tr>
+<tr><td>RSI</td><td>个股页副图输入 RSI 回车;看 RSI6 与 80/20 的位置</td></tr>
+<tr><td>量比</td><td>个股页行情栏即有『量比』字段;&gt;1.5 为放量</td></tr>
+<tr><td>换手率</td><td>行情栏『换手』字段;题材股 5%~15% 为活跃区间</td></tr>
+<tr><td>乖离率</td><td>副图输入 BIAS 回车;BIAS1(6日)&gt;5 视为短期过热</td></tr>
+<tr><td>板块资金</td><td>同花顺首页→行情→板块→行业,按『净流入』排序</td></tr>
+<tr><td>F10股东</td><td>个股页按 F10 →『股东研究』,看股东人数增减(减少=筹码集中)</td></tr>
+<tr><td>F10商誉</td><td>F10 →『财务分析』→ 资产负债表,搜『商誉』,商誉/净资产&gt;30%需警惕</td></tr>
+<tr><td>F10解禁</td><td>F10 →『股本结构』→ 限售解禁,近期大额解禁是利空</td></tr>
+</tbody></table>
+<hr>
+<p>*技术指标由代码计算(AI零计算);评分规则见 scripts/scoring.py;风格配置见 config.yaml。*</p><div class=foot>由 A股投资分析助手 · render-html skill 生成 · 仅供个人研究参考</div></div></body></html>
