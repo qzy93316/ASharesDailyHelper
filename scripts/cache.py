@@ -33,19 +33,25 @@ def _conn() -> sqlite3.Connection:
     return conn
 
 
+def load_meta(key: str):
+    """读缓存并带回抓取时间戳。返回 (data, fetched_date_str, fetched_at_iso) 或 (None, None, None)。"""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT kind, payload, fetched_date, fetched_at FROM kv_cache WHERE key = ?", (key,)
+        ).fetchone()
+    if not row:
+        return None, None, None
+    kind, payload, fetched_date, fetched_at = row
+    if kind == "df":
+        return pd.read_json(io.StringIO(payload), orient="split"), fetched_date, fetched_at
+    return json.loads(payload), fetched_date, fetched_at
+
+
 def load(key: str):
     """读缓存。返回 (data, fetched_date_str) 或 (None, None)。
     data 为 DataFrame 或 原始 list/dict。"""
-    with _conn() as conn:
-        row = conn.execute(
-            "SELECT kind, payload, fetched_date FROM kv_cache WHERE key = ?", (key,)
-        ).fetchone()
-    if not row:
-        return None, None
-    kind, payload, fetched_date = row
-    if kind == "df":
-        return pd.read_json(io.StringIO(payload), orient="split"), fetched_date
-    return json.loads(payload), fetched_date
+    data, fetched_date, _ = load_meta(key)
+    return data, fetched_date
 
 
 def save(key: str, data) -> None:
@@ -68,6 +74,32 @@ def save(key: str, data) -> None:
 def is_fresh_today(fetched_date: str | None) -> bool:
     """缓存是否为"今天"取到的。"""
     return fetched_date == dt.date.today().isoformat()
+
+
+# A 股收盘 15:00,EOD 数据通常盘后几分钟内可取;15:05 作为"数据档期"分界。
+_EOD_BOUNDARY = (15, 5)
+
+
+def _market_epoch(ts: dt.datetime) -> str:
+    """把一个时刻映射到它所属的"日K数据档期":以当日收盘(15:05)为界,
+    分成 pre(盘前/盘中,当日K线尚未定稿)与 post(盘后,当日K线已定稿)两档,
+    并带上日期以区分不同交易日。同档期内的日K缓存可安全复用。"""
+    boundary = ts.replace(hour=_EOD_BOUNDARY[0], minute=_EOD_BOUNDARY[1], second=0, microsecond=0)
+    tag = "post" if ts >= boundary else "pre"
+    return f"{ts.date().isoformat()}:{tag}"
+
+
+def is_fresh_kline(fetched_at: str | None) -> bool:
+    """日K专用新鲜度:抓取时点与当前处于同一"数据档期"才复用(见 _market_epoch)。
+    根治"盘前抓、盘后用"取到隔日旧价:盘前填的缓存到盘后即判为过期、触发一次重拉补当日
+    收盘;盘中互相复用、盘后互相复用都不额外请求(每跨一次收盘边界最多多拉一次)。"""
+    if not fetched_at:
+        return False
+    try:
+        ts = dt.datetime.fromisoformat(fetched_at)
+    except ValueError:
+        return False
+    return _market_epoch(ts) == _market_epoch(dt.datetime.now())
 
 
 def load_aged(key: str, max_age_days: int):

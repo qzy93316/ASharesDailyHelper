@@ -101,13 +101,16 @@ def _call(fn, *args, **kwargs):
     raise RuntimeError(f"{fn.__name__} 连续{RETRIES}次失败: {last_err}")
 
 
-def _cached(key: str, live_fn, allow_stale: bool = True, accept_cached=None):
+def _cached(key: str, live_fn, allow_stale: bool = True, accept_cached=None, fresh_fn=None):
     """三层兜底:当天缓存 → 实时拉取(成功即落库)→ 陈旧缓存。
     live_fn 内部可自带双源降级。
     accept_cached(data)->bool:判定当天缓存是否够格短路;返回 False 则重新尝试实时拉取
-    (用于避免"备源降级结果"占住当天缓存、导致主源恢复后仍不回到主源)。"""
-    data, fetched_date = cache.load(key)
-    if (data is not None and cache.is_fresh_today(fetched_date)
+    (用于避免"备源降级结果"占住当天缓存、导致主源恢复后仍不回到主源)。
+    fresh_fn(fetched_date, fetched_at)->bool:自定义新鲜度判据(默认"当天取到即新鲜");
+    日K用它按收盘档期判定,避免"盘前抓、盘后用"复用到隔日旧价(见 cache.is_fresh_kline)。"""
+    data, fetched_date, fetched_at = cache.load_meta(key)
+    is_fresh = fresh_fn(fetched_date, fetched_at) if fresh_fn else cache.is_fresh_today(fetched_date)
+    if (data is not None and is_fresh
             and (accept_cached is None or accept_cached(data))):
         return data
     try:
@@ -220,8 +223,11 @@ def _coerce_date_col(s: pd.Series) -> pd.Series:
     return s.map(one)
 
 
-def get_kline(code: str, days: int = 180) -> pd.DataFrame:
-    """个股日K(前复权)。东财主源,失败切新浪,再失败用缓存。"""
+def get_kline(code: str, days: int = 180, force_fresh: bool = False) -> pd.DataFrame:
+    """个股日K(前复权)。东财主源,失败切新浪,再失败用缓存。
+    force_fresh=True:忽略缓存强制实时拉取,用于盘中机会池等需要"当前时段"最新一根
+    (盘中实时更新的当日K:现价/量比/换手)的场景——避免复用当日盘前抓的隔日快照;
+    实时失败仍回退陈旧缓存兜底。"""
     def _live():
         try:
             df = _kline_eastmoney(code, days)
@@ -231,7 +237,10 @@ def get_kline(code: str, days: int = 180) -> pd.DataFrame:
         df = df.tail(days).reset_index(drop=True)
         df["日期"] = _coerce_date_col(df["日期"])
         return df
-    return _cached(f"kline:{code}:{days}", _live)
+    # 日K专用新鲜度:按收盘档期判定,盘前抓的缓存到盘后自动失效重拉当日收盘;
+    # force_fresh 则完全不复用缓存(盘中机会池要实时时段数据)。
+    fresh_fn = (lambda fd, fa: False) if force_fresh else (lambda fd, fa: cache.is_fresh_kline(fa))
+    return _cached(f"kline:{code}:{days}", _live, fresh_fn=fresh_fn)
 
 
 def _fund_flow_live(code: str, lmt: int) -> list[dict]:

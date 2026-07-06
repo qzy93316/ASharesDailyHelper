@@ -61,3 +61,24 @@ data:
   freshness_max_age_days: 4    # 数据超过 N 天视为过期,拒绝出结论(缓存陈旧数据在此被拦)
   prefer_source: eastmoney     # 板块数据主源:eastmoney(全,含领涨股) / danginvest(避开东财限流,更稳)。失败自动互备;东财板块clist限流时会自动降级到DangInvest
   danginvest_mode: industry    # DangInvest 板块维度:industry申万大类 / sub同花顺细分 / concept概念
+
+intraday_pool:                 # 盘中机会池(超短线试错):午间11:30扫信号→2:30后择机入场→快进快出
+  enabled: true                # 总开关。弱市/连续负和时可临时设 false 暂停(见规则文档"暂停条件")
+  run_time: "11:30"            # 午间休市后触发时点(实盘数据需本机跑;定时任务只做搜新闻+读报告+提醒)
+  entry_window: "14:30-14:57"  # 尾盘入场窗口:只在此时段、且分时仍走强时手动下单(15:00收盘前留3分钟)
+  max_concurrent: 1            # 同时最多持有的超短线仓数(试错期强制=1,只打最强那一个)
+  position_cap_pct: 20         # 这套打法占总资产上限(小仓试错≤2成),超过不加仓
+  per_trade_pct: 10            # 单笔建议仓位(占总资产%),宁可轻不可重
+  # ── 上午收集的信号门槛(大白话见"盘中机会池-规则.md")──
+  need_limit_up_ladder: true   # 必须有清晰涨停梯队(高度板+梯队结构),只有零星首板=情绪弱→当天空仓
+  min_ladder_height: 2         # 最高连板数≥此值才认为情绪够(=1只有首板不做)
+  volratio_min: 1.2            # 量比下限:当前量能/近期同时段均量,>1=今日放量资金在进
+  volratio_max: 5.0            # 量比上限:过高多为异动脉冲,不追
+  turnover_min_pct: 5          # 换手率下限(%):太低没人玩
+  turnover_max_pct: 30         # 换手率上限(%):>30% 警惕出货
+  need_sector_cluster: true    # 候选须扎堆在当天最强板块里(成群>孤票);孤零零一只强票降级
+  # ── 入场后风控(叠加 style.max_drawdown_pct 的 -8% 硬止损)──
+  soft_stop: true              # 超短线软止损:次日不接力(高开冲高回落/低开走弱)早盘即走,不等-8%
+  target_gain_pct: 5           # 达到此浮盈优先兑现一段(快进快出,不恋战);具体看分时情绪
+  exclude_high_board: true     # 排除已经3板以上的高位股(接力风险高,试错期不碰)
+  # 硬性排除复用 filters 段(exclude_st / exclude_sub_new 等),此处不重复

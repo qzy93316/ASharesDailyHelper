@@ -690,6 +690,34 @@ def _action_plan_html(ap: dict) -> str:
     return "".join(h)
 
 
+def _regime_card(regime) -> str:
+    """大盘环境总开关卡片(regime gate)。无数据返回空串。盘中机会池复用同一版式。"""
+    if not (regime and regime.get("level")):
+        return ""
+    rc = {"进攻": "act-bull", "谨慎": "act-neutral", "防守": "act-bear"}.get(regime["level"], "act-neutral")
+    return (f"<div class='action {rc}'><div class='act-hd'>🧭 大盘环境总开关(regime gate)</div>"
+            f"<div class='act-main'>{regime['level']}</div>"
+            f"<div class='act-sec'>上证 {regime.get('close')} · MA20 {regime.get('ma20')} · MA60 {regime.get('ma60')}"
+            f" —— {regime.get('note','')}</div></div>")
+
+
+def _emotion_card(emo, hd: str = "🌡️ 短线情绪温度计(影子指标,暂不参与选股)") -> str:
+    """短线情绪温度计卡片。hd 可定制(盘前=影子指标;盘中=超短线核心闸门)。无数据返回空串。"""
+    if not (emo and emo.get("phase")):
+        return ""
+    ec = {"高潮": "act-bull", "发酵": "act-bull", "分歧": "act-neutral",
+          "退潮": "act-bear", "冰点": "act-bear"}.get(emo["phase"], "act-neutral")
+    ladder = " ".join(f"{k}板×{v}" for k, v in (emo.get("ladder") or {}).items()) or "无"
+    prom = f"{emo['promotion_rate']}%" if emo.get("promotion_rate") is not None else "—"
+    prem = f"{emo['yzt_premium']:+}%" if emo.get("yzt_premium") is not None else "—"
+    turning = f" · {emo['turning']}" if emo.get("turning") else ""
+    return (f"<div class='action {ec}'><div class='act-hd'>{hd}</div>"
+            f"<div class='act-main'>{emo['temperature']}/100 · {emo['phase']}</div>"
+            f"<div class='act-sec'>涨停{emo.get('zt_count')}家 · 炸板率{emo.get('break_rate')}% · "
+            f"最高{emo.get('max_height')}连板 · 梯队 {ladder} · 晋级率{prom} · 昨停溢价{prem}{turning}"
+            f" —— {emo.get('note','')}</div></div>")
+
+
 def render(data, global_data=None, news_md=None, action_plan=None):
     date = data.get("date", "")
     src = data.get("source", "")
@@ -698,25 +726,13 @@ def render(data, global_data=None, news_md=None, action_plan=None):
              "<div class='note'>⚠️ 个人研究工具自动生成,不构成投资建议。缠论/形态/筹码为启发式估算,辅助研判。"
              f"数据源:{src or '—'}。研判中带下划虚线的术语可鼠标悬浮看解释。</div>"]
     regime = data.get("regime") or (global_data.get("regime") if global_data else None)
-    if regime and regime.get("level"):
-        rc = {"进攻": "act-bull", "谨慎": "act-neutral", "防守": "act-bear"}.get(regime["level"], "act-neutral")
-        parts.append(f"<div class='action {rc}'><div class='act-hd'>🧭 大盘环境总开关(regime gate)</div>"
-                     f"<div class='act-main'>{regime['level']}</div>"
-                     f"<div class='act-sec'>上证 {regime.get('close')} · MA20 {regime.get('ma20')} · MA60 {regime.get('ma60')}"
-                     f" —— {regime.get('note','')}</div></div>")
+    rc = _regime_card(regime)
+    if rc:
+        parts.append(rc)
     emo = data.get("emotion") or (global_data.get("emotion") if global_data else None)
-    if emo and emo.get("phase"):
-        ec = {"高潮": "act-bull", "发酵": "act-bull", "分歧": "act-neutral",
-              "退潮": "act-bear", "冰点": "act-bear"}.get(emo["phase"], "act-neutral")
-        ladder = " ".join(f"{k}板×{v}" for k, v in (emo.get("ladder") or {}).items()) or "无"
-        prom = f"{emo['promotion_rate']}%" if emo.get("promotion_rate") is not None else "—"
-        prem = f"{emo['yzt_premium']:+}%" if emo.get("yzt_premium") is not None else "—"
-        turning = f" · {emo['turning']}" if emo.get("turning") else ""
-        parts.append(f"<div class='action {ec}'><div class='act-hd'>🌡️ 短线情绪温度计(影子指标,暂不参与选股)</div>"
-                     f"<div class='act-main'>{emo['temperature']}/100 · {emo['phase']}</div>"
-                     f"<div class='act-sec'>涨停{emo.get('zt_count')}家 · 炸板率{emo.get('break_rate')}% · "
-                     f"最高{emo.get('max_height')}连板 · 梯队 {ladder} · 晋级率{prom} · 昨停溢价{prem}{turning}"
-                     f" —— {emo.get('note','')}</div></div>")
+    ec = _emotion_card(emo)
+    if ec:
+        parts.append(ec)
     if action_plan:
         parts.append(_action_plan_html(action_plan))
     idx = 1
