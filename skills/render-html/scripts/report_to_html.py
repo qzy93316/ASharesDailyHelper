@@ -216,6 +216,13 @@ def _build_stock(p):
         "emotion_comment": _emotion_comment(p.get("stock_emotion")),
         "fund_comment": _fund_comment(p.get("fundamental")),
     })
+    # 持仓诊断维度:成本感知字段(存在才透传,荐股日报无这些 key → 零影响)
+    for k in ("cost", "qty", "mktval", "pnl_pct", "dist_stop_pct",
+              "holding_tag", "holding_verdict", "main5"):
+        if p.get(k) is not None:
+            s[k] = p[k]
+    if p.get("news"):        # 逐股消息面(server 端已转好的 HTML 串,见 main() --port-news)
+        s["news"] = p["news"]
     return s
 
 
@@ -321,6 +328,12 @@ td.gold{color:var(--gold);font-weight:600}
   padding:0 6px;margin:0 3px 2px 0;font-size:12.5px;font-weight:600;white-space:nowrap}
 .stkchip.star{background:#3a2f14;color:#f0cd6a;border-color:#6b5620}
 .news b{color:#e6edfb}
+/* 持仓组合体检卡片(持仓诊断维度) */
+.mod-h{margin:22px 0 2px;font-size:19px;font-weight:800;color:#e8eefc;border-left:4px solid var(--gold);padding-left:10px}
+.mod-sub{color:var(--muted);font-size:13px;margin:4px 0 6px}
+.cards{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0}
+.mc{flex:1 1 150px;min-width:130px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+.mc .k{font-size:12px;color:var(--muted)}.mc .v{font-size:20px;font-weight:800;margin-top:2px}
 .foot{margin-top:2em;color:var(--muted);font-size:12.5px;text-align:center}
 .nochart{color:#ff8a8a;font-size:13px;padding:12px}
 @media(max-width:720px){.kwrap,.chipchart{flex:1 1 100%}.stat{flex:1 1 22%}}
@@ -503,6 +516,7 @@ function render(){
  if(s.above_sector)extra+="<span class='badge b-blue'>高于板块结构</span>";
  if(s.rps!=null)extra+="<span class='badge b-gray'>RPS "+s.rps+"</span>";
  if(s.zt60!=null&&s.zt60>0)extra+="<span class='badge b-red'>60日涨停×"+s.zt60+"</span>";
+ if(s.holding_tag)extra+="<span class='badge b-yellow'>["+s.holding_tag+"]</span>";
  document.getElementById('hd').innerHTML="<span class='nm'>"+s.name+"</span><span class='cd'>"+s.code+"</span>"+
    badge(s.signal)+"<span class='badge b-score'>评分 "+s.score+"/100</span>"+extra+(s.sector?"<span class='cd'>"+s.sector+"</span>":"");
  document.getElementById('stats').innerHTML=stat('日期',s.info.date)+stat('开盘',s.info.o)+stat('收盘',s.info.c,pc)+
@@ -514,10 +528,13 @@ function render(){
  var co=chipOpt(s);if(co){cc.setOption(co,true);document.getElementById('chip').style.display='';}else{document.getElementById('chip').style.display='none';}
  var fo=flowOpt(s);if(fo){fc.setOption(fo,true);document.getElementById('flow').style.display='';}else{document.getElementById('flow').style.display='none';}
  var items=[];
+ if(s.cost!=null){var lc=(s.pnl_pct!=null&&s.pnl_pct<0)?'down':'up';
+   items.push({i:'💼',t:'持仓',x:'成本 <b>'+s.cost+'</b> · 现价 <b>'+s.info.c+'</b> · 盈亏 <b class="'+lc+'">'+(s.pnl_pct!=null?s.pnl_pct+'%':'—')+'</b> · 市值 '+(s.mktval!=null?s.mktval:'—')+' · <b>['+(s.holding_tag||'')+']</b> '+(s.holding_verdict||'')});}
  if(state.tab==='chan'||state.tab==='pattern')items.push({i:'📐',t:'缠论/形态',x:s.chan_comment});
  else if(state.tab==='candle')items.push({i:'🕯️',t:'K线形态',x:s.candle_comment});
  if(s.emotion_comment)items.push({i:'🔥',t:'个股情绪',x:s.emotion_comment});
  if(s.fund_comment)items.push({i:'📊',t:'基本面速览',x:s.fund_comment});
+ if(s.news)items.push({i:'📰',t:'消息面',x:s.news});
  items.push({i:'🧭',t:'筹码控盘',x:s.chip_comment});
  items.push({i:'💰',t:'资金流向',x:s.flow_comment});
  (s.tips||[]).forEach(function(tp){items.push({i:tp.icon,t:tp.title,x:tp.text});});
@@ -718,13 +735,88 @@ def _emotion_card(emo, hd: str = "🌡️ 短线情绪温度计(影子指标,暂
             f" —— {emo.get('note','')}</div></div>")
 
 
+def _attach_port_news(md: str, picks: list) -> int:
+    """逐股消息面 Markdown(约定每股 `## 名称(代码)` 一节)→ 按 6 位代码回填到对应
+    pick['news'](紧凑 HTML 串,供个股详析区的"📰 消息面"块展示)。返回命中股数。"""
+    import re
+    import html as _h
+
+    def fmt(t: str) -> str:
+        t = _h.escape(t)
+        t = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t)
+        t = re.sub(r"\[([^\]]+)\]\((?:https?|ftp)[^)]+\)", r"\1", t)  # 去链接留文字
+        t = re.sub(r"([+＋]\d+(?:\.\d+)?%)", r"<span class='up'>\1</span>", t)
+        t = re.sub(r"(?<![\w>])(-\d+(?:\.\d+)?%)", r"<span class='down'>\1</span>", t)
+        return t
+
+    sections, cur = {}, None
+    for ln in md.splitlines():
+        head = re.match(r"\s*#{1,4}\s", ln)
+        code_m = re.search(r"(\d{6})", ln) if head else None
+        if head and code_m:            # 标题行含 6 位代码 → 后续正文归属此股
+            cur = code_m.group(1)
+            sections.setdefault(cur, [])
+            continue
+        if cur is not None:
+            sections[cur].append(ln)
+    by_code = {p.get("code"): p for p in picks}
+    hit = 0
+    for code, lines in sections.items():
+        p = by_code.get(code)
+        if not p:
+            continue
+        rows = [fmt(s) for s in (ln.strip().lstrip("-*·").strip() for ln in lines) if s]
+        if rows:
+            p["news"] = "<br>".join(rows)
+            hit += 1
+    return hit
+
+
+def _portfolio_card(summ) -> str:
+    """持仓组合体检卡片(持仓/市值/浮盈亏/亏损/仓位/主力净流出)+ 最大单票集中度。无数据返空。"""
+    import html as _h
+    if not summ:
+        return ""
+    pnl = summ.get("total_pnl")
+    pnl_pct = summ.get("total_pnl_pct")
+    pnl_cls = "down" if (pnl is not None and pnl < 0) else "up"
+    pos = summ.get("position_pct")
+    cards = [("持仓", f"{summ.get('holdings','—')} 只"),
+             ("市值", f"{summ.get('total_mktval','—')}"),
+             ("浮盈亏", f"<span class='{pnl_cls}'>{pnl if pnl is not None else '—'}"
+                       f"({pnl_pct if pnl_pct is not None else '—'}%)</span>"),
+             ("亏损", f"{summ.get('losers','—')} 只"),
+             ("仓位", f"{pos}%" if pos is not None else "—"),
+             ("主力净流出", f"{summ.get('outflow_count','—')}/{summ.get('holdings','—')} 只")]
+    body = ["<div class='mod-h'>组合体检</div>",
+            "<div class='cards'>" + "".join(
+                f"<div class='mc'><div class='k'>{k}</div><div class='v'>{v}</div></div>"
+                for k, v in cards) + "</div>"]
+    if summ.get("heaviest"):
+        body.append(f"<div class='mod-sub'>最大单票 <b>{_h.escape(str(summ['heaviest']))}</b> "
+                    f"占 {summ.get('top_concentration_pct')}%"
+                    + ("(集中度偏高,注意单票风险)" if (summ.get('top_concentration_pct') or 0) >= 40 else "")
+                    + "</div>")
+    return "".join(body)
+
+
 def render(data, global_data=None, news_md=None, action_plan=None):
     date = data.get("date", "")
     src = data.get("source", "")
+    is_port = src == "持仓诊断"        # 持仓诊断维度:组合体检 + 成本感知,与荐股日报分开
     is_stock_only = src in ("点名分析", "全局扫描") and not global_data
-    parts = [f"<h1>A股分析报告 · {date}</h1>",
-             "<div class='note'>⚠️ 个人研究工具自动生成,不构成投资建议。缠论/形态/筹码为启发式估算,辅助研判。"
-             f"数据源:{src or '—'}。研判中带下划虚线的术语可鼠标悬浮看解释。</div>"]
+    if is_port:
+        parts = [f"<h1>💼 持仓诊断报告 · {date}</h1>",
+                 "<div class='note'>⚠️ 按你的<b>实际成本</b>做健康度诊断的研究工具,<b>不构成投资建议</b>;"
+                 "只读持仓、不涉账户密码、不做实盘下单。缠论/形态/筹码为启发式估算,辅助研判。"
+                 "研判中带下划虚线的术语可鼠标悬浮看解释。</div>"]
+        pc = _portfolio_card(data.get("portfolio"))
+        if pc:
+            parts.append(pc)
+    else:
+        parts = [f"<h1>A股分析报告 · {date}</h1>",
+                 "<div class='note'>⚠️ 个人研究工具自动生成,不构成投资建议。缠论/形态/筹码为启发式估算,辅助研判。"
+                 f"数据源:{src or '—'}。研判中带下划虚线的术语可鼠标悬浮看解释。</div>"]
     regime = data.get("regime") or (global_data.get("regime") if global_data else None)
     rc = _regime_card(regime)
     if rc:
@@ -804,26 +896,49 @@ def render(data, global_data=None, news_md=None, action_plan=None):
     n_hot = sum(1 for s in stocks if s.get("pool") == "热点池")
     n_glb = len(stocks) - n_hot
     cnt = f"热点池 {n_hot} 只 + 全局池 {n_glb} 只" if global_data else f"共 {len(stocks)} 只"
-    # 今日之选:非影子池中按 judge 机会质量分排序取前2只置顶聚焦(避免多只平铺无重点)
-    ranked = sorted([s for s in stocks if not s.get("shadow")],
-                    key=lambda s: (s.get("judge") or {}).get("quality", -999), reverse=True)
-    if ranked:
-        cards = []
-        for s in ranked[:2]:
-            j = s.get("judge") or {}; rr = j.get("risk_reward") or {}; ss = j.get("structural_stop") or {}
-            tcls = "up" if (rr.get("rr") or 0) >= 1.5 else ("down" if (rr.get("rr") or 0) < 1 else "")
-            reason = (j.get("tensions") or ["结构健康,无明显矛盾"])[0]
-            cards.append(
-                f"<div class='spot'><div class='spot-nm'>{s['name']} <span class='cd'>{s['code']}</span>"
-                f"<span class='badge b-gray'>{s.get('pool','')}</span></div>"
-                f"<div class='spot-st'>{j.get('stance','—')}</div>"
-                f"<div class='spot-kv'>现价 <b>{s['entry']}</b> · 止损 <b>{ss.get('stop','—')}</b>({ss.get('basis','')})"
-                f" · 盈亏比 <b class='{tcls}'>{rr.get('rr','—')}:1</b> · {rr.get('verdict','')}</div>"
-                f"<div class='spot-rz'>关键:{reason};介入 {j.get('entry','—')}</div></div>")
-        parts.append(f"<h2>{'一二三四五六七八'[idx-1]}、今日之选(按机会质量·风险收益比排序)</h2>"
-                     "<div class='note'>聚焦最值得看的标的:综合盈亏比、板块相对强度、指标矛盾扣分。质量高≠必涨,仅代表当前结构与风险收益相对占优。</div>"
-                     "<div class='spots'>" + "".join(cards) + "</div>")
-        idx += 1
+    if is_port:
+        # 重点处置:按诊断标签严重度置顶最该动手的持仓(与荐股"今日之选"逻辑相反 —— 先看风险)
+        sev = {"止损": 0, "重亏警戒": 1, "逢反弹减": 2, "持有观察": 3, "观察": 4, "持有": 5}
+        ranked = sorted(stocks, key=lambda s: sev.get(s.get("holding_tag"), 9))
+        focus = [s for s in ranked if sev.get(s.get("holding_tag"), 9) <= 2][:2]
+        if focus:
+            cards = []
+            for s in focus:
+                lc = "down" if (s.get("pnl_pct") is not None and s["pnl_pct"] < 0) else "up"
+                ss = (s.get("judge") or {}).get("structural_stop") or {}
+                cards.append(
+                    f"<div class='spot'><div class='spot-nm'>{s['name']} <span class='cd'>{s['code']}</span>"
+                    f"<span class='badge b-yellow'>[{s.get('holding_tag','')}]</span></div>"
+                    f"<div class='spot-st'>{s.get('holding_verdict','—')}</div>"
+                    f"<div class='spot-kv'>成本 <b>{s.get('cost','—')}</b> · 现价 <b>{s['info']['c']}</b>"
+                    f" · 盈亏 <b class='{lc}'>{s.get('pnl_pct','—')}%</b> · 结构止损 <b>{ss.get('stop','—')}</b></div>"
+                    f"<div class='spot-rz'>市值 {s.get('mktval','—')} · 主力近5日 {s.get('main5','—')}万</div></div>")
+            parts.append(f"<h2>{'一二三四五六七八'[idx-1]}、重点处置(按诊断标签严重度置顶)</h2>"
+                         "<div class='note'>先看最该动手的持仓:止损 / 重亏警戒 / 逢反弹减 优先。"
+                         "诊断为成本感知的规则化研判,非喊单,请自行复核决策。</div>"
+                         "<div class='spots'>" + "".join(cards) + "</div>")
+            idx += 1
+    else:
+        # 今日之选:非影子池中按 judge 机会质量分排序取前2只置顶聚焦(避免多只平铺无重点)
+        ranked = sorted([s for s in stocks if not s.get("shadow")],
+                        key=lambda s: (s.get("judge") or {}).get("quality", -999), reverse=True)
+        if ranked:
+            cards = []
+            for s in ranked[:2]:
+                j = s.get("judge") or {}; rr = j.get("risk_reward") or {}; ss = j.get("structural_stop") or {}
+                tcls = "up" if (rr.get("rr") or 0) >= 1.5 else ("down" if (rr.get("rr") or 0) < 1 else "")
+                reason = (j.get("tensions") or ["结构健康,无明显矛盾"])[0]
+                cards.append(
+                    f"<div class='spot'><div class='spot-nm'>{s['name']} <span class='cd'>{s['code']}</span>"
+                    f"<span class='badge b-gray'>{s.get('pool','')}</span></div>"
+                    f"<div class='spot-st'>{j.get('stance','—')}</div>"
+                    f"<div class='spot-kv'>现价 <b>{s['entry']}</b> · 止损 <b>{ss.get('stop','—')}</b>({ss.get('basis','')})"
+                    f" · 盈亏比 <b class='{tcls}'>{rr.get('rr','—')}:1</b> · {rr.get('verdict','')}</div>"
+                    f"<div class='spot-rz'>关键:{reason};介入 {j.get('entry','—')}</div></div>")
+            parts.append(f"<h2>{'一二三四五六七八'[idx-1]}、今日之选(按机会质量·风险收益比排序)</h2>"
+                         "<div class='note'>聚焦最值得看的标的:综合盈亏比、板块相对强度、指标矛盾扣分。质量高≠必涨,仅代表当前结构与风险收益相对占优。</div>"
+                         "<div class='spots'>" + "".join(cards) + "</div>")
+            idx += 1
     parts.append(f"<h2>{'一二三四五六七八'[idx-1]}、个股详析({cnt},下拉切换)</h2>")
     if not stocks:
         parts.append("<p>无入池标的。</p>")
@@ -874,7 +989,9 @@ def main():
     ap = argparse.ArgumentParser(description="富HTML交互报告(可合并热点池+全局池+消息面)")
     ap.add_argument("input", help="日报/点名 侧车 JSON")
     ap.add_argument("--global", dest="glob", help="全局池侧车 JSON(合并展示)")
-    ap.add_argument("--news", help="消息面 Markdown(合并展示)")
+    ap.add_argument("--news", help="消息面 Markdown(整体章节,合并展示)")
+    ap.add_argument("--port-news", dest="port_news",
+                    help="逐股消息面 Markdown(持仓诊断用,每股 `## 名称(代码)` 一节,回填到个股详析)")
     ap.add_argument("--action-plan", dest="action", help="作战方案 JSON(顶部卡片)")
     ap.add_argument("-o", "--output")
     args = ap.parse_args()
@@ -882,6 +999,10 @@ def main():
     if not src.exists():
         raise SystemExit(f"找不到侧车:{src}")
     data = json.loads(src.read_text(encoding="utf-8"))
+    if args.port_news and Path(args.port_news).exists():
+        hit = _attach_port_news(Path(args.port_news).read_text(encoding="utf-8"),
+                                data.get("picks", []))
+        print(f"  逐股消息面已并入 {hit} 只")
     gdata = None
     if args.glob and Path(args.glob).exists():
         gdata = json.loads(Path(args.glob).read_text(encoding="utf-8"))

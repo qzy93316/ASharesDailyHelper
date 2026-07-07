@@ -93,7 +93,12 @@ def read_holdings(path: Path) -> list[dict]:
             except (ValueError, TypeError):
                 return None
         name = str(r[m["name"]]).strip() if m["name"] else code
-        out.append({"code": code, "name": name, "qty": num(m["qty"]),
+        qty = num(m["qty"])
+        # 跳过已清仓的残留空行(数量明确为 0):0 股不是持仓,否则会被误计成一只、
+        # 且成本常为 0 → 显示"成本0.0/None%"噪声。qty 为 None(无数量列)则不过滤。
+        if qty is not None and qty == 0:
+            continue
+        out.append({"code": code, "name": name, "qty": qty,
                     "cost": num(m["cost"]), "price_file": num(m["price"])})
     return out
 
@@ -200,9 +205,22 @@ def render_md(today, picks, summ) -> str:
     return "\n".join(x for x in L if x is not None)
 
 
+def render_html(sidecar: dict, out_path: Path) -> None:
+    """顺手出一份暗色交互图表版(无消息面);要逐股消息面走 report_to_html.py --port-news。"""
+    sys.path.insert(0, str(ROOT / "skills" / "render-html" / "scripts"))
+    import report_to_html  # noqa: E402
+    out_path.write_text(report_to_html.render(sidecar), encoding="utf-8")
+
+
 def main() -> None:
+    # Windows GBK 控制台打印诊断标签里的 emoji(🔻✅⛔ 等)会 UnicodeEncodeError,兜底为 replace
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        pass
     cfg = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
-    args = [a for a in sys.argv[1:]]
+    want_html = "--html" in sys.argv
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
     if args:
         path = Path(args[0])
         if not path.is_absolute():
@@ -236,15 +254,29 @@ def main() -> None:
     sidecar = {"date": str(today), "source": "持仓诊断", "scanned": len(picks),
                "indexes": fetcher.get_index_snapshot(), "sectors": [],
                "portfolio": summ, "picks": picks}
-    (day_dir / f"持仓诊断-{today}.json").write_text(
-        json.dumps(sidecar, ensure_ascii=False, indent=2), encoding="utf-8")
+    json_path = day_dir / f"持仓诊断-{today}.json"
+    json_path.write_text(json.dumps(sidecar, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n完成 → {day_dir / f'持仓诊断-{today}.md'}")
-    print(f"侧车 → {day_dir / f'持仓诊断-{today}.json'}(可用 report_to_html.py 渲染交互图表版)")
+    print(f"侧车 → {json_path}")
+    if want_html:
+        html_path = day_dir / f"持仓诊断-{today}-图表版.html"
+        try:
+            render_html(sidecar, html_path)
+            print(f"图表版 → {html_path}(暗色交互:K线/缠论/形态/资金/基本面 + 组合体检)")
+        except Exception as e:  # noqa: BLE001
+            print(f"图表版渲染失败(可手动跑 report_to_html.py):{e}")
     print(f"\n组合:{summ['holdings']}只 市值{summ['total_mktval']} 浮亏盈{summ['total_pnl']}"
           f"({summ.get('total_pnl_pct')}%) 亏损{summ['losers']}只 主力流出{summ['outflow_count']}只")
     for p in picks:
         print(f"  [{p['holding_tag']}] {p['name']} 成本{p['cost']}/现{p['indicators']['close']}"
               f"({p.get('pnl_pct')}%) {p['signal']} — {p['holding_verdict']}")
+    if not want_html:
+        print("\n出富交互图表版(推荐):")
+        print("  1) 本脚本加 --html 出快速版(无消息面)")
+        print("  2) Claude 联网逐股搜消息面 → 写 reports/YYYYMMDD/持仓消息面-<日期>.md(每股 `## 名称(代码)` 一节)")
+        print(f'  3) python skills/render-html/scripts/report_to_html.py "{json_path}" \\')
+        print(f'       --port-news "reports/{str(today).replace("-","")}/持仓消息面-{today}.md" \\')
+        print(f'       -o "{day_dir / f"持仓诊断-{today}-图表版.html"}"')
 
 
 if __name__ == "__main__":

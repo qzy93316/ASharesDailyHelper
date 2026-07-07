@@ -9,6 +9,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+# Windows GBK 控制台打印 emoji(信号/排列里的 🔵🟢 等)会 UnicodeEncodeError,兜底为 replace
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:  # noqa: BLE001
+    pass
+
 sys.path.insert(0, str(Path(__file__).parent))
 from indicators import compute_indicators  # noqa: E402
 from scoring import score_stock  # noqa: E402
