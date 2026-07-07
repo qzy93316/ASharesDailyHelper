@@ -164,16 +164,59 @@ def get_sector_rank() -> pd.DataFrame:
     return _cached("sector_rank", _sector_rank_live)
 
 
+# 东财成分股失败时的回落维度:同花顺细分(ths_industry)命名与东财行业板块几乎一致
+# (养殖业/煤炭开采/银行/高速公路… 多为精确同名),比申万大类(industry)匹配率高得多。
+_DI_FALLBACK_MODE = "sub"
+
+
+def _di_fallback_summary() -> pd.DataFrame:
+    """DangInvest 同花顺细分排名(当日缓存)。仅用于东财成分股失败时按板块名回落取 groupKey。"""
+    return _cached("di_fallback_summary",
+                   lambda: _call(danginvest.board_summary, mode=_DI_FALLBACK_MODE))
+
+
+def _di_key_for_name(name: str):
+    """在 DangInvest 细分板块里按板块名找 groupKey(精确 → 双向包含匹配)。找不到返回 None。
+    容错东财/同花顺命名差异(如东财'城商行Ⅲ' vs '城商行')。"""
+    try:
+        df = _di_fallback_summary()
+    except Exception as e:  # noqa: BLE001  DangInvest 也挂了 → 无从回落
+        print(f"  [成分股降级] DangInvest 板块排名不可用,无法回落 —— {e}")
+        return None
+    labels = {str(r["板块名称"]).strip(): r["_key"]
+              for _, r in df.iterrows() if r.get("_key")}
+    if name in labels:            # 优先精确同名
+        return labels[name]
+    for lbl, k in labels.items():  # 再双向包含(东财名去掉罗马数字等后缀仍可匹配)
+        if name and (name in lbl or lbl in name):
+            return k
+    return None
+
+
+def _sector_cons_em_or_di(name: str) -> pd.DataFrame:
+    """东财成分股;失败则按板块名回落 DangInvest(补上'成分股仅东财一家、无法降级'的单点缺口)。"""
+    try:
+        return _call(ak.stock_board_industry_cons_em, symbol=name)
+    except Exception as e:  # noqa: BLE001  东财成分股 clist 限流常态
+        key = _di_key_for_name(name)
+        if not key:
+            raise
+        print(f"  [成分股降级] 东财失败,{name} 切 DangInvest(key={key}) —— {e}")
+        return _call(danginvest.board_cons, key, mode=_DI_FALLBACK_MODE)
+
+
 def get_sector_cons(sector) -> pd.DataFrame:
     """板块成分股。sector 为 get_sector_rank() 的一行(含 _源/_key/板块名称),
-    据其数据源分派到对应接口,保证与排名同源、命名一致。"""
+    据其数据源分派到对应接口,保证与排名同源、命名一致。
+    东财源额外带自愈降级:成分股接口(clist)限流失败时按板块名回落 DangInvest,
+    避免'排名拿到了但成分股全跳过 → 行业强弱榜整榜为空'。"""
     src = sector.get("_源", "东财")
     key = sector.get("_key") or sector["板块名称"]
     name = sector["板块名称"]
     if src == "DangInvest":
         live = lambda: _call(danginvest.board_cons, key, mode=_DI_MODE)
     else:
-        live = lambda: _call(ak.stock_board_industry_cons_em, symbol=name)
+        live = lambda: _sector_cons_em_or_di(name)
     return _cached(f"sector_cons:{src}:{key}", live)
 
 

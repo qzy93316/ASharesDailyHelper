@@ -59,7 +59,7 @@ data:
   request_interval_sec: 1.8    # 接口调用间隔(秒),实际会 +0~50% 随机抖动;防限流。1.0→1.8:1.0 冷启动易触发东财IP临时冷却(实测退化到~16s/只的超时重试),主动拉开间隔换掉不确定的重试退避,总耗时通常更短
   max_retries: 1               # 单接口重试次数(2→1:限流时少重试、快速回退缓存,避免"重试续上封禁";配合 1.8s 间隔)
   freshness_max_age_days: 4    # 数据超过 N 天视为过期,拒绝出结论(缓存陈旧数据在此被拦)
-  prefer_source: eastmoney     # 板块数据主源:eastmoney(全,含领涨股) / danginvest(避开东财限流,更稳)。失败自动互备;东财板块clist限流时会自动降级到DangInvest
+  prefer_source: eastmoney     # 板块数据主源:eastmoney(全,含领涨股) / danginvest(避开东财限流,更稳)。失败自动互备;排名+成分股(get_sector_cons)均已带自动降级:东财成分股clist限流失败时按板块名回落DangInvest,行业强弱榜可自愈,平时仍用东财保留领涨股。持续大面积限流时也可手动切 danginvest(领涨股会置空)
   danginvest_mode: industry    # DangInvest 板块维度:industry申万大类 / sub同花顺细分 / concept概念
 
 intraday_pool:                 # 盘中机会池(超短线试错):午间11:30扫信号→2:30后择机入场→快进快出
