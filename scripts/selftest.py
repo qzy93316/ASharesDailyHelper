@@ -93,6 +93,21 @@ checks += [
     ("卖出信号评分≤无信号基线", _sc_sell["total"] <= _sc_none["total"]),
     ("不传sig与旧行为一致(无信号确认项)", "信号确认" not in _sc_none["breakdown"]),
 ]
+# ── 信号有效性回测(signal_backtest.backtest_bars):V形序列前向收益+胜率+末端剔除 ──
+import signal_backtest as _sbt  # noqa: E402
+def _mkbars(seq):
+    return [{"d": f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}", "o": c, "c": c,
+             "l": c * 0.995, "h": c * 1.005, "v": 1e6} for i, c in enumerate(seq)]
+_seq = [60 - 0.7 * i for i in range(15)] + [50 + 0.6 * i for i in range(75)]  # 先跌后涨(V形)
+_bars = _mkbars(_seq)
+_rows = _sbt.backtest_bars(_bars, "TEST", primary=5)
+_buys = [r for r in _rows if r["dir"] == "buy"]
+_didx = {b["d"]: i for i, b in enumerate(_bars)}
+checks += [
+    ("信号回测:V形序列采到信号", len(_rows) > 0),
+    ("信号回测:上升段买入信号皆胜(前向为正)", bool(_buys) and all(r["win"] for r in _buys)),
+    ("信号回测:末端不足horizon的信号已剔除", all(_didx[r["d"]] + max(_sbt.HORIZONS) < len(_bars) for r in _rows)),
+]
 print()
 print("== 断言检查")
 ok = True
