@@ -65,6 +65,34 @@ checks = [
     ("多头排列识别正确", i1["alignment"] in ("多头排列", "弱多")),
     ("空头排列识别正确", i3["alignment"] in ("空头排列", "弱空")),
 ]
+# ── 逐日信号层(signals.py):构造已知金叉/超卖/KDJ金叉序列断言命中 ──
+import signals as _sig  # noqa: E402
+_ser = {"dates": ["d0", "d1", "d2", "d3"],
+        "dif": [-1, -0.5, 0.5, 1.0], "dea": [0, 0, 0, 0.2], "macd": [-2, -1, 1, 1.6],
+        "kdj_k": [10, 20, 60, 70], "kdj_d": [30, 30, 40, 50],
+        "rsi6": [15, 25, 50, 60], "vol": [1, 1, 1, 1], "kline": [[1, 1, 1, 1]] * 4}
+_sg = _sig.compute(_ser)
+checks += [
+    ("MACD金叉被识别", any("金叉" in x["kind"] for x in _sg["macd"])),
+    ("RSI超卖回升被识别", any(x["dir"] == "buy" for x in _sg["rsi"])),
+    ("KDJ金叉被识别", any(x["dir"] == "buy" for x in _sg["kdj"])),
+]
+
+# ── Phase 2:信号反哺 judge/scoring ──
+import judge as _judge  # noqa: E402
+_sigsum = {"macd": {"dir": "buy", "kind": "金叉", "bars_ago": 1},
+           "kdj": {"dir": "buy", "kind": "KDJ金叉", "bars_ago": 2}}
+_jd = _judge.synthesize(i1, None, None, None, i1["close"] * 1.1, 8, None, sig=_sigsum)
+_sc_none = score_stock(i1, HARD)                 # 不传 sig(全市场扫描口径)
+_sc_buy = score_stock(i1, HARD, _sigsum)         # 传买入共振
+_sc_sell = score_stock(i1, HARD, {"macd": {"dir": "sell", "kind": "死叉", "bars_ago": 1}})
+checks += [
+    ("judge消费信号产出signal_notes", bool(_jd.get("signal_notes"))),
+    ("信号确认加分有界(|adj|≤4)", abs(_sc_buy["breakdown"].get("信号确认", 0)) <= 4),
+    ("买入共振评分≥无信号基线", _sc_buy["total"] >= _sc_none["total"]),
+    ("卖出信号评分≤无信号基线", _sc_sell["total"] <= _sc_none["total"]),
+    ("不传sig与旧行为一致(无信号确认项)", "信号确认" not in _sc_none["breakdown"]),
+]
 print()
 print("== 断言检查")
 ok = True

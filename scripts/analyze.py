@@ -21,6 +21,7 @@ import chan  # noqa: E402
 import emotion  # noqa: E402
 import fundamental  # noqa: E402
 import judge  # noqa: E402
+import signals  # noqa: E402  逐日买卖信号(反哺研判/评分)
 from indicators import compute_indicators  # noqa: E402
 from scoring import score_stock  # noqa: E402
 
@@ -39,18 +40,21 @@ def analyze_one(code: str, name: str, cfg: dict) -> dict:
     k = fetcher.get_kline(code, rp["kline_days"])
     fresh, fresh_msg = fetcher.check_freshness(k, cfg["data"]["freshness_max_age_days"])
     ind = compute_indicators(k)
-    sc = score_stock(ind, hr)
     stop, target = _plan(ind, dd)
     kk = k.tail(chart_bars)
     bars = [{"d": str(r["日期"]), "o": float(r["开盘"]), "c": float(r["收盘"]),
              "l": float(r["最低"]), "h": float(r["最高"]), "v": float(r["成交量"]),
              "换手": round(float(r.get("换手", 0) or 0), 5)}
             for _, r in kk.iterrows()]
+    # 逐日买卖信号(纯本地):供图上画箭头 + 反哺研判/评分(与图同源一致)
+    sig = signals.compute(signals.series_from_bars(bars))
+    sig_sum = signals.latest_summary(sig, [b["d"] for b in bars])
+    sc = score_stock(ind, hr, sig_sum)
     chip = chips.compute_chips(bars)
     flow = fetcher.get_fund_flow(code)
     chan_res = chan.analyze(bars)
     turn_pct = round((bars[-1].get("换手", 0) or 0) * 100, 2)
-    jd = judge.synthesize(ind, chip, judge.flow_sum(flow), chan_res, target, dd, turn_pct)
+    jd = judge.synthesize(ind, chip, judge.flow_sum(flow), chan_res, target, dd, turn_pct, sig=sig_sum)
     return {
         "code": code, "name": name, "sector": "点名分析", "sector_pct": 0.0,
         "stock_emotion": emotion.stock_heat(code, bars),
@@ -58,7 +62,7 @@ def analyze_one(code: str, name: str, cfg: dict) -> dict:
         "signal": sc["signal"], "score": sc["total"], "breakdown": sc["breakdown"],
         "entry_date": ind["date"], "entry_close": ind["close"],
         "plan_stop": jd["structural_stop"]["stop"], "plan_target": target,
-        "indicators": ind, "bars": bars,
+        "indicators": ind, "bars": bars, "signals": sig, "signal_summary": sig_sum,
         "chips": chip, "chip_comment": chips.control_comment(chip),
         "fund_flow": flow, "judge": jd, "fresh_msg": fresh_msg, "vetoes": sc["vetoes"],
     }

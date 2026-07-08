@@ -4,7 +4,7 @@
 """
 
 
-def score_stock(ind: dict, hard_rules: dict) -> dict:
+def score_stock(ind: dict, hard_rules: dict, sig: dict | None = None) -> dict:
     b = {}
 
     # 1. 趋势(均线排列) 30分
@@ -52,6 +52,17 @@ def score_stock(ind: dict, hard_rules: dict) -> dict:
     # 6. 支撑 10分
     dist = (ind["close"] - ind["support"]) / ind["close"] * 100
     b["支撑"] = 10 if 0 <= dist <= 5 else (6 if dist <= 10 else 3)
+
+    # 信号确认(可选,封顶 ±4):新近(≤3日)MACD/KDJ/RSI 买卖信号多源共振微调,
+    # 仅在传入 sig 时生效(点名/持仓诊断);全市场扫描不传 → 0,不影响选股基线。不参与硬否决。
+    adj = 0
+    if sig:
+        fb = sum(1 for k in ("macd", "kdj", "rsi")
+                 if (sig.get(k) or {}).get("dir") == "buy" and (sig[k].get("bars_ago", 99)) <= 3)
+        fbr = sum(1 for k in ("macd", "kdj", "rsi")
+                  if (sig.get(k) or {}).get("dir") == "sell" and (sig[k].get("bars_ago", 99)) <= 3)
+        adj = max(-4, min(4, (fb - fbr) * 2))
+        b["信号确认"] = adj
 
     total = sum(b.values())
 

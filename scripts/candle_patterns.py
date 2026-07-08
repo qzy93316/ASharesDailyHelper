@@ -462,11 +462,20 @@ def detect(bars: list[dict], lookback: int = 20, per_bar: int = 2) -> list[dict]
 
 
 def latest_comment(hits: list[dict]) -> str:
-    """最近命中的形态转研判文字(取最后3个,优先高可靠度)。"""
+    """最近命中的形态转研判文字。**按交易日降序**取最近的日子(必含最新交易日),
+    不足则并入次新日,保证信息量。旧实现按可靠度排序取前3,会把最新一两天的形态挤掉,
+    导致文字停留在几天前、与图上最新K线形态对不上 —— 已改为以最新日期为准。"""
     if not hits:
         return "近端未识别到明显的经典K线组合形态。"
     tag = {"bull": "看涨", "bear": "看跌", "neutral": "中性"}
-    rel_rank = {"高": 0, "中": 1, "低": 2}
-    recent = sorted(hits[-6:], key=lambda h: rel_rank.get(h["reliability"], 3))[:3]
-    return "近端K线形态:" + ";".join(
-        f"{h['d']} {h['name_cn']}({tag.get(h['bias'],'')},可靠度{h['reliability']})" for h in recent)
+    by_day: dict[str, list[dict]] = {}
+    for h in hits:                       # hits 为日期升序
+        by_day.setdefault(h["d"], []).append(h)
+    out, days_used = [], 0
+    for d in sorted(by_day, reverse=True):
+        out += [f"{h['d']} {h['name_cn']}({tag.get(h['bias'],'')},可靠度{h['reliability']})"
+                for h in by_day[d]]
+        days_used += 1
+        if len(out) >= 3 or days_used >= 2:  # 够3个形态或已含最近2个交易日即停
+            break
+    return "近端K线形态:" + ";".join(out)

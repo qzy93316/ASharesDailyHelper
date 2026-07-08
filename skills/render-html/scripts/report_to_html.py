@@ -21,8 +21,14 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "skills" / "trading-memory" / "scripts"))
 import chan  # noqa: E402
 import candle_patterns  # noqa: E402
+import signals as _signals  # noqa: E402  逐日买卖信号(图上画箭头)
+try:
+    import ledger as _ledger  # noqa: E402  操盘台账(B/T/S 标注 + 成本线)
+except Exception:  # noqa: BLE001
+    _ledger = None
 
 ECHARTS_CDN = "https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"
 GLOSSARY_PATH = Path(__file__).resolve().parents[3] / "knowledge" / "kb" / "glossary.json"
@@ -66,10 +72,13 @@ def _series(bars):
     mid = close.rolling(20).mean()
     std = close.rolling(20).std()
 
+    vol_s = df["v"] / 1e4
     return {
         "dates": [b["d"] for b in bars],
         "kline": [[b["o"], b["c"], b["l"], b["h"]] for b in bars],
-        "vol": [round(b["v"] / 1e4, 1) for b in bars],
+        "vol": [round(v, 1) for v in vol_s],
+        "mavol5": r(vol_s.rolling(5).mean(), 1), "mavol10": r(vol_s.rolling(10).mean(), 1),
+        "turn": [round((b.get("换手") or 0) * 100, 2) for b in bars],
         "ma5": r(ma[5], 2), "ma10": r(ma[10], 2), "ma20": r(ma[20], 2), "ma60": r(ma[60], 2),
         "boll_mid": r(mid, 2), "boll_up": r(mid + 2 * std, 2), "boll_dn": r(mid - 2 * std, 2),
         "dif": r(dif), "dea": r(dea), "macd": r(hist),
@@ -223,6 +232,26 @@ def _build_stock(p):
             s[k] = p[k]
     if p.get("news"):        # 逐股消息面(server 端已转好的 HTML 串,见 main() --port-news)
         s["news"] = p["news"]
+    # 逐日买卖信号:优先复用 analyze 已算并落盘的(与研判同源一致),缺失则从图序列现算兜底
+    s["signals"] = p.get("signals") or _signals.compute(s)
+    # 台账 B/T/S 标注 + 持仓成本线(台账驱动,全图通用;无记录则无标注)
+    if _ledger is not None:
+        try:
+            tr = _ledger.daily_trades(p["code"])
+            if tr:
+                s["trades"] = tr
+        except Exception:  # noqa: BLE001
+            pass
+    cost = p.get("cost")     # 持仓诊断优先用 portfolio 成本
+    if cost is None and _ledger is not None:
+        try:
+            op = _ledger.open_cost(p["code"])
+            if op:
+                cost = op.get("avg_cost")
+        except Exception:  # noqa: BLE001
+            pass
+    if cost is not None:
+        s["cost_line"] = cost
     return s
 
 
@@ -264,6 +293,7 @@ select{background:var(--panel2);color:var(--ink);border:1px solid var(--line);bo
 .subctrl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 6px}
 .subctrl .lbl{color:var(--muted);font-size:13px}
 .subsel{padding:4px 8px;font-size:13px;font-weight:500}
+.pfix{padding:4px 10px;font-size:13px;font-weight:600;color:#8fbaff;background:var(--panel2);border:1px solid var(--line);border-radius:6px}
 .pbtn{width:26px;height:26px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:15px;line-height:1}
 .pbtn:hover{background:var(--accent);color:#fff}
 .hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
@@ -275,7 +305,19 @@ select{background:var(--panel2);color:var(--ink);border:1px solid var(--line);bo
 .stat{flex:1 1 10%;min-width:84px;padding:7px 10px;border-right:1px solid var(--line)}
 .stat .sl{display:block;color:var(--muted);font-size:11px}.stat .sv{display:block;font-size:15px;font-weight:600}
 .row{display:flex;gap:14px;flex-wrap:wrap}
-.kwrap{flex:4 1 720px;min-width:360px}
+.kwrap{flex:4 1 720px;min-width:360px;display:flex;gap:2px}
+.kside{flex:0 0 82px;padding-top:30px;font-size:11px}
+.ksrow{display:flex;justify-content:space-between;padding:1px 3px;line-height:1.35}
+.ksl{color:var(--muted)}.ksv{font-weight:600;color:#c7d3ea}.ksv.up{color:var(--up)}.ksv.down{color:var(--down)}.ksv.gold{color:var(--gold)}
+.kshr{height:1px;background:var(--line);margin:4px 2px}
+.kmain{flex:1 1 auto;position:relative;min-width:0}
+.phdrs{position:absolute;top:0;left:0;right:0;height:100%;pointer-events:none;z-index:3}
+.phdr{position:absolute;left:56px;font-size:11px;font-weight:600;white-space:nowrap;color:#aebbd4;pointer-events:auto;transform:translateY(4px)}
+.fsbtn{margin-left:auto;padding:5px 12px;border-radius:8px;background:var(--panel2);color:#8fbaff;
+  border:1px solid var(--line);cursor:pointer;font-size:13px;white-space:nowrap}
+.fsbtn:hover{background:#1f3050}
+#stockPanel.fs{background:var(--bg);padding:14px 18px;overflow:auto}
+#stockPanel.fs .kchart{height:82vh}
 .kchart{width:100%;height:70vh;min-height:600px}
 .chipchart{flex:1 1 300px;height:70vh;min-height:600px;min-width:260px}
 .flowchart{width:100%;height:230px;margin-top:10px}
@@ -335,26 +377,143 @@ td.gold{color:var(--gold);font-weight:600}
 .mc{flex:1 1 150px;min-width:130px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
 .mc .k{font-size:12px;color:var(--muted)}.mc .v{font-size:20px;font-weight:800;margin-top:2px}
 .foot{margin-top:2em;color:var(--muted);font-size:12.5px;text-align:center}
+/* K线形态:可折叠·按交易日降序·点击定位 */
+.clist{margin:10px 0;padding:10px 12px;background:var(--panel2);border-radius:8px}
+.clist-hd{font-size:13px;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.ctoggle{cursor:pointer;color:#8fbaff;font-size:12.5px;border:1px solid #345;border-radius:5px;padding:1px 8px}
+.ctoggle:hover{background:#1f3050}
+.crow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px}
+.crow:hover{background:rgba(255,255,255,.04)}
+.crow.on{background:rgba(240,205,106,.12);outline:1px solid #6b5620}
+.crow .cdate{min-width:5.8em;color:#c3cee0;font-weight:600}
+.cbadge{display:inline-block;padding:0 7px;border-radius:4px;font-size:12px;font-weight:600;white-space:nowrap}
+.cbadge.bull{background:#2a1a1f;color:#ff9aa8;border:1px solid #5a2a35}
+.cbadge.bear{background:#13241d;color:#8ce0c0;border:1px solid #22523f}
+.cbadge.neutral{background:#20222d;color:#f0cd6a;border:1px solid #4a3f1a}
 .nochart{color:#ff8a8a;font-size:13px;padding:12px}
 @media(max-width:720px){.kwrap,.chipchart{flex:1 1 100%}.stat{flex:1 1 22%}}
 """
 
 JS = r"""
 var S=window.STOCKS||[], GL=window.GLOSSARY||{};
-var state={i:0,tab:'k',panels:['MACD']};
-var ALL_IND=['MACD','RSI','KDJ','WR','量','BIAS'];
+var state={i:0,tab:'k',panels:['量','MACD'],candleOpen:false,candleDay:null};  // 量强制置顶不可删,其下默认MACD
+var ALL_IND=['MACD','KDJ','RSI','量'];
 var kc,cc,fc;
 function ud(v){return v>=0?'#f6465d':'#2ebd85';}
 function tip(ps){
+ // 分区(主图 / 各副指标)+ 分隔线 + 源色一致 + 趋势箭头;K线形态tab附当日形态;台账买卖点展开
  if(!ps||!ps.length)return '';
- var out='<b>'+ps[0].axisValue+'</b>';
- ps.forEach(function(p){var n=p.seriesName,v=p.data;
-  if(n==='K线'){out+='<br/>开 '+v[1]+' 收 '+v[2]+' 低 '+v[3]+' 高 '+v[4];}
-  else if(v==null){}
-  else if(n==='量'){out+='<br/>量(万手) '+(v&&v.value!=null?v.value:v);}
-  else{out+='<br/>'+n+' '+(v&&v.value!=null?v.value:v);}
- });return out;
+ var s=S[state.i];if(!s)return '';
+ var i=ps[0].dataIndex;if(i==null||i<0||i>=s.dates.length)return '';
+ var k=s.kline[i],prev=i>0?s.kline[i-1][1]:k[0];
+ function col(v){return v>=prev?'#ff9aa8':'#8ce0c0';}
+ var chg=prev?((k[1]-prev)/prev*100):0,amp=prev?((k[3]-k[2])/prev*100):0;
+ var hr="<div style='border-top:1px solid #33415c;margin:5px 0'></div>";
+ function kv(l,v,c){return "<span style='display:inline-block;min-width:82px'>"+l+" <span style='color:"+c+"'>"+v+"</span></span>";}
+ // 主图数据跨行显示(每行两列),避免拥挤
+ var out="<b style='font-size:13px'>"+s.dates[i]+"</b>";
+ out+="<div style='margin-top:3px;line-height:1.75'>"+
+   kv('开',k[0],col(k[0]))+kv('收',k[1],col(k[1]))+"<br/>"+
+   kv('高',k[3],col(k[3]))+kv('低',k[2],col(k[2]))+"<br/>"+
+   kv('涨幅',(chg>=0?'+':'')+chg.toFixed(2)+'%',chg>=0?'#ff9aa8':'#8ce0c0')+
+   kv('振幅',amp.toFixed(2)+'%','#c3cee0')+"</div>";
+ state.panels.forEach(function(ind){out+=hr+"<div>"+panelHeader(ind,s,i,true)+"</div>";});
+ // 缠论 tab:补回当日缠论结构(分型/买卖点/背驰/最新中枢/笔线段端点)
+ if(state.tab==='chan'&&s.chan)out+=chanTip(s.chan,s.dates[i],hr);
+ // K线形态 tab:附当日命中的形态
+ if(state.tab==='candle'&&s.candles){var cs=s.candles.filter(function(h){return h.d===s.dates[i];});
+   if(cs.length){var tg={bull:'看涨',bear:'看跌',neutral:'中性'};
+     out+=hr+"<div style='color:#f0cd6a'>🕯️ "+cs.map(function(h){return h.name_cn+"("+tg[h.bias]+")";}).join('、')+"</div>";}}
+ // 台账买卖点
+ ps.forEach(function(p){if(p.data&&p.data._t)out+=hr+tradeTip(p.data._t);});
+ return out;
 }
+function chanTip(c,d,hr){
+ var bsmap={'3B':'三类买点','3S':'三类卖点','1B':'一类买点','1S':'一类卖点'};
+ var parts=[];
+ (c.fractals||[]).forEach(function(f){if(f.d===d)parts.push(f.type==='top'?'顶分型':'底分型');});
+ if(c.third_bs&&c.third_bs.d===d)parts.push(bsmap[c.third_bs.type]||c.third_bs.type);
+ if(c.divergence&&c.divergence.d===d)parts.push((bsmap[c.divergence.bs]||c.divergence.bs)+'('+c.divergence.type+')');
+ var line1=parts.length?"<div style='color:#ffd43b'>📐 缠论:"+parts.join(' · ')+"</div>":'';
+ var info=[];
+ var seg=(c.segments||[]);if(seg.length)info.push('线段 '+(seg[seg.length-1].dir==='up'?'向上':'向下'));
+ var bi=(c.bi||[]);if(bi.length)info.push('笔 '+(bi[bi.length-1].type==='top'?'向上':'向下'));
+ var zs=(c.zhongshu||[]);if(zs.length){var z=zs[zs.length-1];info.push('最新中枢 '+z.zd+'~'+z.zg);}
+ var line2=info.length?"<div style='color:#aebbd4'>"+info.join(' · ')+"</div>":'';
+ return (line1||line2)?hr+line1+line2:'';
+}
+function tradeTip(t){
+ // 台账买卖点悬浮:隐藏账户名,显示 方向·日期·均价·数量(T 分两行)
+ var L='';
+ if(t.buy)L+="<br/><span style='color:#ff9aa8'>🔴 买入</span> "+t.d+" 均价 "+t.buy.avg+" 数量 "+t.buy.qty;
+ if(t.sell)L+="<br/><span style='color:#8fbaff'>🔵 卖出</span> "+t.d+" 均价 "+t.sell.avg+" 数量 "+t.sell.qty;
+ return L;
+}
+function sigMarkPoint(list){return {symbolSize:14,label:{show:false},data:list.map(function(g){var buy=g.dir==='buy';
+  return {coord:[g.d,g.y],symbol:'arrow',symbolRotate:buy?0:180,symbolOffset:[0,buy?11:-11],
+    itemStyle:{color:buy?'#f6465d':'#2ebd85'},value:g.kind||''};})};}
+function _arr(cur,prev){if(cur==null||prev==null)return '';
+ return cur>prev?"<span style='color:#f6465d'>↑</span>":(cur<prev?"<span style='color:#2ebd85'>↓</span>":'');}
+// 副指标字段口径解释(独立于共享术语库,避免 glossify 误伤单字母 K/D/J);样式复用 .gl/.tip
+var FIELDGL={
+ 'MACD(12,26,9)':{term:'MACD(12,26,9)',plain:'快慢EMA之差(DIF)与其9日EMA(DEA),及两者差×2的柱,衡量趋势动能与金叉死叉。'},
+ 'DIF':{term:'DIF 快线',plain:'12日EMA−26日EMA。DIF上穿DEA=金叉(偏多),下穿=死叉(偏空)。'},
+ 'DEA':{term:'DEA 慢线',plain:'DIF 的9日EMA(信号线)。与DIF的交叉给出金叉/死叉。'},
+ '柱':{term:'MACD 柱',plain:'(DIF−DEA)×2。红柱放大=多头动能增强,绿柱放大=空头动能增强。'},
+ 'KDJ(9,3,3)':{term:'KDJ(9,3,3)',plain:'随机指标:K快、D慢、J最敏感。>80超买、<20超卖;K上穿D金叉。'},
+ 'K':{term:'KDJ K 值',plain:'快线。上穿D线=金叉(偏多)。'},
+ 'D':{term:'KDJ D 值',plain:'慢线。K下穿D=死叉(偏空)。'},
+ 'J':{term:'KDJ J 值',plain:'最敏感线。>100极度超买,<0极度超卖。'},
+ 'RSI(6,12)':{term:'RSI(6,12)',plain:'相对强弱:RSI6快、RSI12慢。>80超买、<20超卖。'},
+ 'RSI6':{term:'RSI6(快)',plain:'6日相对强弱。>80超买回落风险,<20超卖或反弹。'},
+ 'RSI12':{term:'RSI12(慢)',plain:'12日相对强弱,趋势确认更稳。'},
+ '成交量':{term:'成交量',plain:'当日成交量(万手)。放量配合价格方向更可信。'},
+ 'MAVOL5':{term:'MAVOL5',plain:'5日成交量均线。量在其上方=相对放量。'},
+ 'MAVOL10':{term:'MAVOL10',plain:'10日成交量均线,量能中枢。'}};
+function fgl(label,key){var g=FIELDGL[key||label];if(!g)return label;
+ return "<span class='gl'>"+label+"<span class='tip'><span class='t'>"+g.term+"</span><br/>"+g.plain+"</span></span>";}
+function panelHeader(ind,s,i,plain){
+ function g(a){return (a&&a[i]!=null)?a[i]:'-';}
+ function gp(a){return (a&&i>0&&a[i-1]!=null)?a[i-1]:null;}
+ function T(label,key){return plain?label:fgl(label,key);}   // plain=true 用于 tooltip(不带术语悬浮)
+ if(ind==='MACD')return "<b>"+T('MACD(12,26,9)')+"</b> <span style='color:#f0b429'>"+T('DIF')+" "+g(s.dif)+_arr(s.dif[i],gp(s.dif))+
+   "</span> <span style='color:#4c8dff'>"+T('DEA')+" "+g(s.dea)+_arr(s.dea[i],gp(s.dea))+
+   "</span> <span style='color:"+(((s.macd||[])[i]||0)>=0?'#f6465d':'#2ebd85')+"'>"+T('柱')+" "+g(s.macd)+"</span>";
+ if(ind==='KDJ')return "<b>"+T('KDJ(9,3,3)')+"</b> <span style='color:#f0b429'>"+T('K')+" "+g(s.kdj_k)+_arr(s.kdj_k[i],gp(s.kdj_k))+
+   "</span> <span style='color:#4c8dff'>"+T('D')+" "+g(s.kdj_d)+_arr(s.kdj_d[i],gp(s.kdj_d))+
+   "</span> <span style='color:#c56cf0'>"+T('J')+" "+g(s.kdj_j)+_arr(s.kdj_j[i],gp(s.kdj_j))+"</span>";
+ if(ind==='RSI')return "<b>"+T('RSI(6,12)')+"</b> <span style='color:#c56cf0'>"+T('RSI6')+" "+g(s.rsi6)+_arr(s.rsi6[i],gp(s.rsi6))+
+   "</span> <span style='color:#4c8dff'>"+T('RSI12')+" "+g(s.rsi12)+_arr(s.rsi12[i],gp(s.rsi12))+"</span>";
+ if(ind==='量')return "<b>"+T('成交量')+"</b> 总手 "+g(s.vol)+" <span style='color:#f0b429'>"+T('MAVOL5')+" "+g(s.mavol5)+
+   "</span> <span style='color:#c56cf0'>"+T('MAVOL10')+" "+g(s.mavol10)+"</span>";
+ return '';
+}
+function buildPanelHeaders(){var host=document.getElementById('phdrs');if(!host)return;
+ var L=layout(state.panels.length);
+ host.innerHTML=state.panels.map(function(ind,i){
+   return "<div class='phdr' data-p='"+i+"' style='top:"+L[i+1].t+"'></div>";}).join('');}
+function curIdx(ev){if(!ev||!ev.axesInfo||!ev.axesInfo.length)return -1;
+ var v=ev.axesInfo[0].value,s=S[state.i];if(!s)return -1;
+ if(typeof v==='number')return Math.round(v);
+ return s.dates.indexOf(v);}
+function updateHover(idx){var s=S[state.i];if(!s)return;
+ var n=s.dates.length;if(idx==null||idx<0||idx>=n)idx=n-1;
+ var el=document.getElementById('kside');
+ if(el){var k=s.kline[idx],prev=idx>0?s.kline[idx-1][1]:k[0];
+  var o=k[0],c=k[1],lo=k[2],hi=k[3];
+  var chg=prev?((c-prev)/prev*100):0,amp=prev?((hi-lo)/prev*100):0,amt=(c*(s.vol[idx]||0)/1e4);
+  function cc(v){return v>=prev?'up':'down';}
+  function rw(l,v,cls,lc){return "<div class='ksrow'><span class='ksl'"+(lc?" style='color:"+lc+"'":"")+">"+l+
+    "</span><span class='ksv "+(cls||'')+"'>"+v+"</span></div>";}
+  el.innerHTML=rw('时间',s.dates[idx].slice(5),'')+rw('开盘',o,cc(o))+rw('最高',hi,cc(hi))+rw('最低',lo,cc(lo))+rw('收盘',c,cc(c))+
+    rw('涨幅',(chg>=0?'+':'')+chg.toFixed(2)+'%',chg>=0?'up':'down')+rw('振幅',amp.toFixed(2)+'%','gold')+
+    rw('成交量',s.vol[idx],c>=o?'up':'down')+rw('成交额',amt.toFixed(1)+'亿','')+
+    (s.turn?rw('换手',(s.turn[idx]!=null?s.turn[idx]:'-')+'%',''):'')+"<div class='kshr'></div>"+
+    rw('MA5',(s.ma5[idx]!=null?s.ma5[idx]:'-'),'','#f0b429')+rw('MA10',(s.ma10[idx]!=null?s.ma10[idx]:'-'),'','#4c8dff')+
+    rw('MA20',(s.ma20[idx]!=null?s.ma20[idx]:'-'),'','#c56cf0')+rw('MA60',(s.ma60[idx]!=null?s.ma60[idx]:'-'),'','#7a869c');
+ }
+ [].forEach.call(document.querySelectorAll('#phdrs .phdr'),function(e){
+   e.innerHTML=panelHeader(state.panels[+e.dataset.p],s,idx);});}
 // ---- 副指标区构建器:返回 {yAxis, series[]} 绑定到 grid=gi ----
 function ind_MACD(s,gi){return {yAxis:subY(gi,'MACD'),series:[
   {name:'MACD',type:'bar',xAxisIndex:gi,yAxisIndex:gi,data:s.macd,itemStyle:{color:function(p){return ud(p.data);}}},
@@ -368,23 +527,20 @@ function ind_KDJ(s,gi){return {yAxis:subY(gi,'KDJ'),series:[
   {name:'K',type:'line',xAxisIndex:gi,yAxisIndex:gi,data:s.kdj_k,showSymbol:false,lineStyle:{width:1,color:'#f0b429'}},
   {name:'D',type:'line',xAxisIndex:gi,yAxisIndex:gi,data:s.kdj_d,showSymbol:false,lineStyle:{width:1,color:'#4c8dff'}},
   {name:'J',type:'line',xAxisIndex:gi,yAxisIndex:gi,data:s.kdj_j,showSymbol:false,lineStyle:{width:1,color:'#c56cf0'}}]};}
-function ind_WR(s,gi){return {yAxis:subY(gi,'WR',0,100),series:[
-  {name:'WR',type:'line',xAxisIndex:gi,yAxisIndex:gi,data:s.wr,showSymbol:false,lineStyle:{width:1,color:'#f0b429'},
-   markLine:{symbol:'none',data:[{yAxis:20,lineStyle:{color:'#5a2a2a',type:'dashed'}},{yAxis:80,lineStyle:{color:'#264a3a',type:'dashed'}}]}}]};}
 function ind_VOL(s,gi){var vc=s.kline.map(function(k){return k[1]>=k[0]?'#f6465d':'#2ebd85';});
- return {yAxis:subY(gi,'量'),series:[{name:'量',type:'bar',xAxisIndex:gi,yAxisIndex:gi,
-   data:s.vol.map(function(v,i){return {value:v,itemStyle:{color:vc[i]}};})}]};}
-function ind_BIAS(s,gi){return {yAxis:subY(gi,'BIAS'),series:[
-  {name:'BIAS',type:'line',xAxisIndex:gi,yAxisIndex:gi,data:s.bias,showSymbol:false,lineStyle:{width:1,color:'#f0b429'},
-   markLine:{symbol:'none',data:[{yAxis:0,lineStyle:{color:'#33415c'}}]}}]};}
-var INDI={'MACD':ind_MACD,'RSI':ind_RSI,'KDJ':ind_KDJ,'WR':ind_WR,'量':ind_VOL,'BIAS':ind_BIAS};
-function subY(gi,name,mn,mx){var y={scale:true,gridIndex:gi,name:name,nameTextStyle:{color:'#7a869c',fontSize:10},
-  axisLabel:{color:'#7a869c',fontSize:9},splitLine:{show:false},axisLine:{lineStyle:{color:'#25324a'}}};
+ return {yAxis:subY(gi,'量'),series:[
+   {name:'量',type:'bar',xAxisIndex:gi,yAxisIndex:gi,data:s.vol.map(function(v,i){return {value:v,itemStyle:{color:vc[i]}};})},
+   {name:'MAVOL5',type:'line',xAxisIndex:gi,yAxisIndex:gi,data:s.mavol5,showSymbol:false,lineStyle:{width:1,color:'#f0b429'}},
+   {name:'MAVOL10',type:'line',xAxisIndex:gi,yAxisIndex:gi,data:s.mavol10,showSymbol:false,lineStyle:{width:1,color:'#c56cf0'}}]};}
+var INDI={'MACD':ind_MACD,'KDJ':ind_KDJ,'RSI':ind_RSI,'量':ind_VOL};
+function subY(gi,name,mn,mx){var y={scale:true,gridIndex:gi,axisLabel:{color:'#7a869c',fontSize:9},
+  splitLine:{show:false},axisLine:{lineStyle:{color:'#25324a'}}};   // 不再显示白色指标名(改由左上角 header)
   if(mn!=null){y.min=mn;y.max=mx;} return y;}
-function layout(n){ // 返回 [{top,height}] 主图+ n 个副图(百分比)
+function layout(n){ // 返回 [{top,height}] 主图+ n 个副图(百分比);最多 4 个副图
  if(n<=1)return [{t:'4%',h:'62%'},{t:'72%',h:'20%'}];
  if(n===2)return [{t:'4%',h:'50%'},{t:'59%',h:'16%'},{t:'79%',h:'15%'}];
- return [{t:'4%',h:'40%'},{t:'48%',h:'13%'},{t:'64%',h:'13%'},{t:'80%',h:'13%'}];
+ if(n===3)return [{t:'4%',h:'40%'},{t:'48%',h:'13%'},{t:'64%',h:'13%'},{t:'80%',h:'13%'}];
+ return [{t:'3%',h:'33%'},{t:'40%',h:'12.5%'},{t:'55%',h:'12.5%'},{t:'70%',h:'12.5%'},{t:'85%',h:'12.5%'}];
 }
 function catX(dates,gi,showLabel){return {type:'category',data:dates,gridIndex:gi,boundaryGap:true,
   axisLabel:{show:showLabel,color:'#7a869c',fontSize:10},axisLine:{lineStyle:{color:'#25324a'}},
@@ -395,18 +551,43 @@ function baseK(s,panels){
  var xAxis=[],yAxis=[],series=[];
  for(var gi=0;gi<=n;gi++){xAxis.push(catX(s.dates,gi,gi===n));zoom.push(gi);}
  yAxis.push({scale:true,gridIndex:0,axisLabel:{color:'#7a869c'},splitLine:{lineStyle:{color:'#1b2740'}}});
- series.push({name:'K线',type:'candlestick',xAxisIndex:0,yAxisIndex:0,data:s.kline,
-   itemStyle:{color:'#f6465d',color0:'#2ebd85',borderColor:'#f6465d',borderColor0:'#2ebd85'},
-   markLine:{symbol:'none',label:{position:'insideEndTop',fontSize:10},data:[
+ var kml=[
      {name:'目标',yAxis:s.target,lineStyle:{color:'#2ebd85',type:'dashed'},label:{formatter:'目标 '+s.target,color:'#2ebd85'}},
      {name:'止损',yAxis:s.stop,lineStyle:{color:'#f0b429',type:'dashed'},label:{formatter:'止损 '+s.stop,color:'#f0b429'}},
-     {name:'现价',yAxis:s.entry,lineStyle:{color:'#4c8dff',type:'dotted'},label:{formatter:'现价 '+s.entry,color:'#4c8dff'}}]}});
+     {name:'现价',yAxis:s.entry,lineStyle:{color:'#4c8dff',type:'dotted'},label:{formatter:'现价 '+s.entry,color:'#4c8dff'}}];
+ series.push({name:'K线',type:'candlestick',xAxisIndex:0,yAxisIndex:0,data:s.kline,
+   itemStyle:{color:'#f6465d',color0:'#2ebd85',borderColor:'#f6465d',borderColor0:'#2ebd85'},
+   markLine:{symbol:'none',label:{position:'insideEndTop',fontSize:10},data:kml}});
+ // 持仓成本线:独立 line series(常显、不可编辑、跨所有 tab 都在;不被各 tab 的 markLine 覆盖)
+ if(s.cost_line!=null)series.push({name:'成本',type:'line',xAxisIndex:0,yAxisIndex:0,z:4,
+   data:s.dates.map(function(){return s.cost_line;}),showSymbol:false,
+   lineStyle:{width:1.4,color:'#ff922b',type:'solid'},
+   endLabel:{show:true,formatter:'成本 '+s.cost_line,color:'#ff922b',fontSize:10}});
  [['MA5','#f0b429','ma5'],['MA10','#4c8dff','ma10'],['MA20','#c56cf0','ma20'],['MA60','#7a869c','ma60'],
   ['BOLL上','#5a6b8c','boll_up'],['BOLL中','#8a97b5','boll_mid'],['BOLL下','#5a6b8c','boll_dn']].forEach(function(m){
    series.push({name:m[0],type:'line',xAxisIndex:0,yAxisIndex:0,data:s[m[2]],smooth:true,showSymbol:false,
      lineStyle:{width:1,color:m[1],type:m[0].indexOf('BOLL')===0?'dashed':'solid',opacity:m[0].indexOf('BOLL')===0?0.7:1}});});
  var legend=['K线','MA5','MA10','MA20','MA60','BOLL中'];
- panels.forEach(function(ind,i){var gi=i+1,b=INDI[ind](s,gi);yAxis.push(b.yAxis);series=series.concat(b.series);});
+ // 台账买卖点:小圆点(尽量不与K线重叠)+ 点外更小字体 B/S/T(B在下方、S/T在上方),悬浮在 tip() 展开
+ if(s.trades&&s.trades.length){
+   var kmap={};s.dates.forEach(function(d,i){kmap[d]=s.kline[i];});
+   series.push({name:'台账',type:'scatter',xAxisIndex:0,yAxisIndex:0,z:6,symbolSize:7,
+     data:s.trades.map(function(t){var k=kmap[t.d]||[0,0,0,0];
+       var col=t.type==='B'?'#f6465d':(t.type==='S'?'#4c8dff':'#ff922b');
+       var below=t.type==='B';                 // 买点在K线下方,卖/T点在上方
+       var y=below?k[2]*0.978:k[3]*1.022;
+       return {value:[t.d,y],_t:t,itemStyle:{color:col},
+         label:{show:true,formatter:t.type,color:col,fontWeight:'bold',fontSize:9,
+           position:below?'bottom':'top',distance:3}};})});
+   legend.push('台账');
+ }
+ var SIGKEY={'MACD':'macd','KDJ':'kdj','RSI':'rsi'};
+ var sigCut=s.dates[Math.max(0,s.dates.length-60)];   // 买卖箭头只画最近约60个交易日,降噪
+ panels.forEach(function(ind,i){var gi=i+1,b=INDI[ind](s,gi);yAxis.push(b.yAxis);
+   var sk=SIGKEY[ind];
+   if(sk&&s.signals&&s.signals[sk]){var rec=s.signals[sk].filter(function(g){return g.d>=sigCut;});
+     if(rec.length)b.series[0].markPoint=sigMarkPoint(rec);}
+   series=series.concat(b.series);});
  return {backgroundColor:'transparent',animation:false,
   legend:{data:legend,top:0,textStyle:{color:'#aebbd4',fontSize:11}},
   tooltip:{trigger:'axis',axisPointer:{type:'cross'},backgroundColor:'#1b2740',borderColor:'#25324a',textStyle:{color:'#d5dced'},formatter:tip},
@@ -448,7 +629,11 @@ function addPattern(opt,s){
 function addCandle(opt,s){var col={bull:'#f6465d',bear:'#2ebd85',neutral:'#f0b429'};
  opt.series[0].markPoint={symbolSize:8,data:(s.candles||[]).map(function(h){
    return {coord:[h.d,h.bias==='bear'?h.price*1.01:h.price*0.99],symbol:'circle',itemStyle:{color:col[h.bias]||'#f0b429'},
-     label:{show:true,formatter:h.name_cn,color:col[h.bias]||'#f0b429',fontSize:9,position:h.bias==='bear'?'top':'bottom'}};})};}
+     label:{show:true,formatter:h.name_cn,color:col[h.bias]||'#f0b429',fontSize:9,position:h.bias==='bear'?'top':'bottom'}};})};
+ // 选中交易日:在K图上加一条竖向定位虚线(保留 baseK 已有的目标/止损横线)
+ if(state.candleDay){var mlk=opt.series[0].markLine=opt.series[0].markLine||{symbol:'none',label:{position:'insideEndTop',fontSize:10},data:[]};
+   mlk.data.push({xAxis:state.candleDay,lineStyle:{color:'#f0cd6a',type:'dashed',width:1.5},
+     label:{show:true,formatter:state.candleDay,color:'#f0cd6a',fontSize:10,position:'insideEndTop'}});}}
 function chipOpt(s){var ch=s.chip;if(!ch)return null;
  function nidx(a,v){var bi=0,bd=1e18;for(var i=0;i<a.length;i++){var d=Math.abs(a[i]-v);if(d<bd){bd=d;bi=i;}}return bi;}
  var cols=ch.price_levels.map(function(p){return p<=ch.current?'#f6465d':'#2ebd85';});
@@ -460,9 +645,12 @@ function chipOpt(s){var ch=s.chip;if(!ch)return null;
   xAxis:{type:'value',axisLabel:{color:'#7a869c',fontSize:9,formatter:'{value}%'},splitLine:{lineStyle:{color:'#1b2740'}}},
   yAxis:{type:'category',data:ch.price_levels,axisLabel:{color:'#7a869c',fontSize:9,interval:4},axisLine:{lineStyle:{color:'#25324a'}}},
   series:[{type:'bar',data:ch.amounts.map(function(v,i){return {value:v,itemStyle:{color:cols[i]}};}),
-    markLine:{symbol:'none',data:[
+    markLine:{symbol:'none',data:(function(){var m=[
       {yAxis:nidx(ch.price_levels,ch.current),lineStyle:{color:'#4c8dff'},label:{formatter:'现价 '+ch.current,color:'#4c8dff',fontSize:9,position:'insideEndTop'}},
-      {yAxis:nidx(ch.price_levels,ch.avg_cost),lineStyle:{color:'#f0b429',type:'dashed'},label:{formatter:'均本 '+ch.avg_cost,color:'#f0b429',fontSize:9,position:'insideEndBottom'}}]}}]};}
+      {yAxis:nidx(ch.price_levels,ch.avg_cost),lineStyle:{color:'#f0b429',type:'dashed'},label:{formatter:'均本 '+ch.avg_cost,color:'#f0b429',fontSize:9,position:'insideEndBottom'}}];
+      // 持仓成本线并入筹码分布,直观看成本落在筹码峰的哪一侧(套牢盘/获利盘)
+      if(s.cost_line!=null)m.push({yAxis:nidx(ch.price_levels,s.cost_line),lineStyle:{color:'#ff922b',width:1.4},label:{formatter:'持仓成本 '+s.cost_line,color:'#ff922b',fontSize:9,position:'insideEndTop'}});
+      return m;})()}}]};}
 function flowOpt(s){var f=s.flow;if(!f)return null;
  var lines=[['超大单(机构)','super','#f6465d'],['大单(游资)','big','#ff922b'],['中单(中户)','mid','#4c8dff'],['小单(散户)','small','#8a97b5']];
  return {backgroundColor:'transparent',animation:false,
@@ -492,19 +680,59 @@ function glossify(html){
  return html;
 }
 function badge(sig){var m={'🔵':'b-blue','🟡':'b-yellow','⚪':'b-gray','🔴':'b-red'};for(var e in m){if(sig.indexOf(e)>=0)return "<span class='badge "+m[e]+"'>"+sig+"</span>";}return "<span class='badge b-gray'>"+sig+"</span>";}
+function pinVol(){ // 成交量强制置顶且唯一:确保 panels[0]==='量'
+ var p=state.panels,j=p.indexOf('量');
+ if(j<0)p.unshift('量');else if(j>0){p.splice(j,1);p.unshift('量');}
+}
 function renderSubCtrl(){
- var used=state.panels, html="<span class='lbl'>副指标区("+used.length+"/3):</span>";
+ pinVol();
+ var used=state.panels, html="<span class='lbl'>副指标区("+used.length+"/4):</span>";
  used.forEach(function(ind,i){
-  html+="<select class='subsel' data-i='"+i+"'>"+ALL_IND.map(function(o){
+  if(i===0){ // 成交量:强制展示、不可编辑、不可删除
+   html+="<span class='pfix'>成交量(固定)</span>";return;
+  }
+  html+="<select class='subsel' data-i='"+i+"'>"+ALL_IND.filter(function(o){return o!=='量';}).map(function(o){
     var dis=(used.indexOf(o)>=0&&o!==ind)?" disabled":"";
     return "<option value='"+o+"'"+(o===ind?" selected":"")+dis+">"+o+"</option>";}).join("")+"</select>";
-  if(used.length>1)html+="<button class='pbtn' data-rm='"+i+"'>×</button>";
+  html+="<button class='pbtn' data-rm='"+i+"'>×</button>";
  });
- if(used.length<3)html+="<button class='pbtn' data-add='1'>+</button>";
+ if(used.length<4)html+="<button class='pbtn' data-add='1'>+</button>";
  var el=document.getElementById('subctrl');el.innerHTML=html;
  [].forEach.call(el.querySelectorAll('.subsel'),function(sel){sel.onchange=function(){state.panels[+this.dataset.i]=this.value;render();};});
  [].forEach.call(el.querySelectorAll('[data-rm]'),function(b){b.onclick=function(){state.panels.splice(+this.dataset.rm,1);render();};});
- var add=el.querySelector('[data-add]');if(add)add.onclick=function(){var avail=ALL_IND.filter(function(o){return state.panels.indexOf(o)<0;});if(avail.length){state.panels.push(avail[0]);render();}};
+ var add=el.querySelector('[data-add]');if(add)add.onclick=function(){var avail=ALL_IND.filter(function(o){return o!=='量'&&state.panels.indexOf(o)<0;});if(avail.length){state.panels.push(avail[0]);render();}};
+}
+// 单个术语 → 带悬浮解释的 span(术语库命中才包裹,否则原样返回;供 K线形态 chip 复用 hover)
+function glTerm(name){
+ var g=GL[name];if(!g)return name;
+ return "<span class='gl'>"+name+"<span class='tip'><span class='t'>"+g.term+"</span><br/>"+g.plain+
+   (g.example?"<br/><span class='e'>例:"+g.example+"</span>":"")+(g.usage?"<br/><span class='u'>用:"+g.usage+"</span>":"")+"</span></span>";
+}
+// ---- K线形态:按交易日降序分组,可折叠(默认只显最近一日),点击某日在K图上定位 ----
+function renderCandleList(s){
+ var el=document.getElementById('candleList');if(!el)return;
+ var cs=s.candles||[];
+ if(!cs.length){el.innerHTML='';state.candleDay=null;return;}
+ var tag={bull:'看涨',bear:'看跌',neutral:'中性'};
+ var map={},order=[];
+ cs.forEach(function(h){if(!map[h.d]){map[h.d]=[];order.push(h.d);}map[h.d].push(h);});
+ order.sort(function(a,b){return a<b?1:-1;});      // 日期降序
+ var days=order.slice(0,10);                        // 最多10个交易日
+ if(!state.candleDay||days.indexOf(state.candleDay)<0)state.candleDay=days[0];
+ var shown=state.candleOpen?days:days.slice(0,1);
+ var rows=shown.map(function(d){
+  var chips=map[d].map(function(h){return "<span class='cbadge "+(h.bias||'neutral')+"'>"+glTerm(h.name_cn)+" · "+tag[h.bias]+" · 可靠度"+h.reliability+"</span>";}).join(' ');
+  return "<div class='crow"+(d===state.candleDay?' on':'')+"' onclick=\"pickCandleDay('"+d+"')\"><span class='cdate'>"+d+"</span>"+chips+"</div>";
+ }).join('');
+ var more=days.length>1?"<span class='ctoggle' onclick='toggleCandle()'>"+(state.candleOpen?'收起 ▴':('展开全部 '+days.length+' 个交易日 ▾'))+"</span>":'';
+ el.innerHTML="<div class='clist'><div class='clist-hd'><b style='color:#e8eefc'>🕯️ K线形态</b>"+
+   "<span>近 "+days.length+" 个交易日 · 降序 · 点击某日在K图定位</span>"+more+"</div>"+rows+"</div>";
+}
+function toggleCandle(){state.candleOpen=!state.candleOpen;renderCandleList(S[state.i]);}
+function pickCandleDay(d){
+ state.candleDay=d;state.tab='candle';
+ [].forEach.call(document.querySelectorAll('.tab'),function(x){x.classList.toggle('on',x.dataset.t==='candle');});
+ render();
 }
 function render(){
  var s=S[state.i];if(!s)return;
@@ -525,13 +753,13 @@ function render(){
  var opt=baseK(s,state.panels);
  if(state.tab==='chan')addChan(opt,s);else if(state.tab==='pattern')addPattern(opt,s);else if(state.tab==='candle')addCandle(opt,s);
  kc.setOption(opt,true);
+ buildPanelHeaders();updateHover(null);   // 副图左上角 header + 左栏数值(默认显最新一根)
  var co=chipOpt(s);if(co){cc.setOption(co,true);document.getElementById('chip').style.display='';}else{document.getElementById('chip').style.display='none';}
  var fo=flowOpt(s);if(fo){fc.setOption(fo,true);document.getElementById('flow').style.display='';}else{document.getElementById('flow').style.display='none';}
  var items=[];
  if(s.cost!=null){var lc=(s.pnl_pct!=null&&s.pnl_pct<0)?'down':'up';
    items.push({i:'💼',t:'持仓',x:'成本 <b>'+s.cost+'</b> · 现价 <b>'+s.info.c+'</b> · 盈亏 <b class="'+lc+'">'+(s.pnl_pct!=null?s.pnl_pct+'%':'—')+'</b> · 市值 '+(s.mktval!=null?s.mktval:'—')+' · <b>['+(s.holding_tag||'')+']</b> '+(s.holding_verdict||'')});}
  if(state.tab==='chan'||state.tab==='pattern')items.push({i:'📐',t:'缠论/形态',x:s.chan_comment});
- else if(state.tab==='candle')items.push({i:'🕯️',t:'K线形态',x:s.candle_comment});
  if(s.emotion_comment)items.push({i:'🔥',t:'个股情绪',x:s.emotion_comment});
  if(s.fund_comment)items.push({i:'📊',t:'基本面速览',x:s.fund_comment});
  if(s.news)items.push({i:'📰',t:'消息面',x:s.news});
@@ -550,12 +778,14 @@ function render(){
      "<div class='jcell'><span class='jl'>结构止损</span><span class='jv'>"+(ss.stop!=null?ss.stop:'—')+"</span><span class='jx'>"+(ss.basis||'')+(ss.too_far?" · <span class='down'>止损偏远"+ss.dist_pct+"%风险大</span>":" · 距现价"+(ss.dist_pct!=null?ss.dist_pct:'-')+"%")+"</span></div>"+
      "<div class='jcell'><span class='jl'>盈亏比</span><span class='jv "+rrcls+"'>"+(rr.rr!=null?rr.rr+" : 1":'—')+"</span><span class='jx'>"+(rr.verdict||'')+(rr.reward_pct!=null?"(赚"+rr.reward_pct+"% / 亏"+rr.risk_pct+"%)":"")+"</span></div>"+
    "</div>"+
+   ((j.signal_notes&&j.signal_notes.length)?"<div class='act-sec'>📡 信号:"+j.signal_notes.join(';')+"</div>":"")+
    ((j.tensions&&j.tensions.length)?"<div class='act-sec con'>⚠️ 矛盾点:"+j.tensions.join(';')+"</div>":"<div class='act-sec'>✓ 未见明显指标矛盾</div>")+
    ((j.grey&&j.grey.length)?"<div class='act-sec con'>🟡 灰色预警:"+j.grey.join(';')+"</div>":"")+
    "<div class='act-sec'>🎯 介入:"+(j.entry||'—')+"</div>"+
    "<div class='act-sec con'>🛑 失效:"+(j.invalidation||'—')+"</div>"+
    "<div class='act-dis'>止损为结构化(现价下方最近有效支撑),非机械百分比;盈亏比<1 表示不值博。仅供研究,请自行复核。</div></div>";
  document.getElementById('judge').innerHTML=glossify(ah+jhtml);
+ renderCandleList(s);
 }
 document.addEventListener('DOMContentLoaded',function(){
  if(!S.length)return;
@@ -565,7 +795,20 @@ document.addEventListener('DOMContentLoaded',function(){
  sel.onchange=function(){state.i=+this.value;render();};
  [].forEach.call(document.querySelectorAll('.tab'),function(t){t.onclick=function(){state.tab=this.dataset.t;
    [].forEach.call(document.querySelectorAll('.tab'),function(x){x.classList.remove('on');});this.classList.add('on');render();};});
- window.addEventListener('resize',function(){kc.resize();cc.resize();fc.resize();});
+ // 放大/全屏:整块个股分析面板进入/退出全屏,再点还原
+ var fsBtn=document.getElementById('fsBtn'),panel=document.getElementById('stockPanel');
+ function afterResize(){kc.resize();cc.resize();fc.resize();buildPanelHeaders();updateHover(null);}
+ if(fsBtn&&panel){fsBtn.onclick=function(){
+   if(document.fullscreenElement)document.exitFullscreen();
+   else if(panel.requestFullscreen)panel.requestFullscreen();};
+  document.addEventListener('fullscreenchange',function(){
+    var on=!!document.fullscreenElement;
+    panel.classList.toggle('fs',on);fsBtn.textContent=on?'⤡ 还原':'⤢ 全屏';
+    setTimeout(afterResize,60);});}
+ // 游标联动:悬浮某交易日 → 刷新左栏 + 副图 header;移出恢复最新
+ kc.on('updateAxisPointer',function(ev){var i=curIdx(ev);if(i>=0)updateHover(i);});
+ kc.getZr().on('globalout',function(){updateHover(null);});
+ window.addEventListener('resize',afterResize);
  render();
  // 静态区(消息面 + 作战方案/大盘/情绪卡)也做术语高亮;#judge 是动态区已在 render 内 glossify,跳过
  ['.news','.action'].forEach(function(sel){[].forEach.call(document.querySelectorAll(sel),function(el){
@@ -944,13 +1187,16 @@ def render(data, global_data=None, news_md=None, action_plan=None):
         parts.append("<p>无入池标的。</p>")
     else:
         parts.append(
-            "<div class='ctrl'><select id='sel'></select><div class='tabs'>"
+            "<div id='stockPanel'><div class='ctrl'><select id='sel'></select><div class='tabs'>"
             "<div class='tab on' data-t='k'>K线</div><div class='tab' data-t='chan'>缠论(分型/笔/线段/中枢/买卖点)</div>"
-            "<div class='tab' data-t='pattern'>形态(支撑压力/颈线)</div><div class='tab' data-t='candle'>K线形态(70种)</div></div></div>"
+            "<div class='tab' data-t='pattern'>形态(支撑压力/颈线)</div><div class='tab' data-t='candle'>K线形态(70种)</div></div>"
+            "<button class='fsbtn' id='fsBtn' title='放大 / 全屏(再点还原)'>⤢ 全屏</button></div>"
             "<div class='hd' id='hd'></div><div class='stats' id='stats'></div>"
             "<div class='subctrl' id='subctrl'></div>"
-            "<div class='row'><div class='kwrap'><div class='kchart' id='k'></div></div><div class='chipchart' id='chip'></div></div>"
-            "<div class='flowchart' id='flow'></div><div id='judge'></div>")
+            "<div class='row'><div class='kwrap'><div class='kside' id='kside'></div>"
+            "<div class='kmain'><div class='kchart' id='k'></div><div class='phdrs' id='phdrs'></div></div></div>"
+            "<div class='chipchart' id='chip'></div></div>"
+            "<div class='flowchart' id='flow'></div><div id='candleList'></div><div id='judge'></div></div>")
 
     glossary = {}
     if GLOSSARY_PATH.exists():

@@ -18,6 +18,7 @@ import chan  # noqa: E402
 import judge  # noqa: E402
 import emotion  # noqa: E402
 import fundamental  # noqa: E402
+import signals  # noqa: E402  逐日买卖信号(反哺研判)
 from indicators import compute_indicators  # noqa: E402
 from scoring import score_stock  # noqa: E402
 
@@ -310,7 +311,9 @@ def build_sidecar(today, indexes, top_sectors, picks, scanned, cfg, source, regi
         flow = fetcher.get_fund_flow(p["code"])
         chan_res = chan.analyze(bars)
         turn_pct = round((bars[-1].get("换手", 0) or 0) * 100, 2)
-        jd = judge.synthesize(ind, chip, judge.flow_sum(flow), chan_res, target, dd, turn_pct)
+        sig = signals.compute(signals.series_from_bars(bars))       # 逐日信号(图上箭头 + 反哺研判)
+        sig_sum = signals.latest_summary(sig, [b["d"] for b in bars])
+        jd = judge.synthesize(ind, chip, judge.flow_sum(flow), chan_res, target, dd, turn_pct, sig=sig_sum)
         heat = emotion.stock_heat(p["code"], bars, industry=p.get("sector", ""))
         fnd = fundamental.summarize(p["code"])
         out_picks.append({
@@ -320,7 +323,7 @@ def build_sidecar(today, indexes, top_sectors, picks, scanned, cfg, source, regi
             "breakdown": p["sc"]["breakdown"],
             "entry_date": ind["date"], "entry_close": ind["close"],
             "plan_stop": jd["structural_stop"]["stop"], "plan_target": target,
-            "indicators": ind, "bars": bars,
+            "indicators": ind, "bars": bars, "signals": sig, "signal_summary": sig_sum,
             "chips": chip, "chip_comment": chips.control_comment(chip),
             "fund_flow": flow, "judge": jd,
             "sector_avg": p.get("sector_avg"), "above_sector": p.get("above_sector", False),

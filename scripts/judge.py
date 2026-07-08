@@ -106,7 +106,43 @@ def _grey(ind, turn_pct):
     return g
 
 
-def synthesize(ind, chip, fs, chan_res, target, dd_pct, turn_pct=None, strategy=""):
+def _signal_notes(sig, chan_res):
+    """逐日买卖信号(MACD/KDJ/RSI)与缠论买卖点交叉验证 → 观察结论 + 偏多/偏空计数。
+    同向多源=共振(增信心);多空并存=分歧(列为观察,不轻信单指标)。"""
+    if not sig and not chan_res:
+        return [], 0, 0
+    bull, bear = [], []
+    for key in ("macd", "kdj", "rsi"):
+        s = (sig or {}).get(key)
+        if not s:
+            continue
+        fresh = s.get("bars_ago", 99) <= 3
+        tag = f"{s.get('kind','')}" + ("(新近)" if fresh else f"({s.get('bars_ago')}日前)")
+        (bull if s.get("dir") == "buy" else bear).append(tag)
+    if chan_res:
+        tbs, dv = chan_res.get("third_bs"), chan_res.get("divergence")
+        if tbs and tbs.get("type") == "3B":
+            bull.append("缠论三买")
+        elif tbs and tbs.get("type") == "3S":
+            bear.append("缠论三卖")
+        if dv and dv.get("bs") == "1B":
+            bull.append("缠论底背驰")
+        elif dv and dv.get("bs") == "1S":
+            bear.append("缠论顶背驰")
+    # 新近(≤3日)信号计数,供质量分微调与评分
+    fresh_bull = sum(1 for x in bull if "新近" in x or "缠论" in x)
+    fresh_bear = sum(1 for x in bear if "新近" in x or "缠论" in x)
+    notes = []
+    if bull and bear:
+        notes.append("信号分歧:偏多[" + "、".join(bull) + "] vs 偏空[" + "、".join(bear) + "],以趋势/量价为准,不轻信单指标")
+    elif bull:
+        notes.append(("多源买入信号共振:" if len(bull) >= 2 else "买入信号:") + "、".join(bull))
+    elif bear:
+        notes.append(("多源卖出信号共振:" if len(bear) >= 2 else "卖出信号:") + "、".join(bear))
+    return notes, fresh_bull, fresh_bear
+
+
+def synthesize(ind, chip, fs, chan_res, target, dd_pct, turn_pct=None, strategy="", sig=None):
     close = ind["close"]
     ss = structural_stop(ind, chan_res, dd_pct)
     rr = risk_reward(close, ss["stop"], target)
@@ -138,9 +174,16 @@ def synthesize(ind, chip, fs, chan_res, target, dd_pct, turn_pct=None, strategy=
 
     invalidation = f"跌破结构止损 {ss['stop']}({ss['basis']})离场;或所属板块龙头转弱、热点降温"
 
+    signal_notes, fb, fbr = _signal_notes(sig, chan_res)
+    # 偏空信号在多头结构里出现 → 补一条矛盾(动能与趋势背离预警)
+    bullish = align in ("多头排列", "弱多")
+    if bullish and fbr and not fb:
+        tensions.append("趋势偏多但近端出现卖出信号(" + "、".join(signal_notes) + "),动能转弱预警")
+
     q = min(rr["rr"], 3) * 10 - len(tensions) * 4 - (6 if ss["too_far"] else 0)
     q += 6 if align == "多头排列" else (2 if align == "弱多" else 0)
+    q += min(fb, 2) * 2 - min(fbr, 2) * 2   # 新近买入共振加分、卖出信号减分(封顶±4)
 
     return {"stance": stance, "structural_stop": ss, "risk_reward": rr,
             "tensions": tensions, "grey": grey, "entry": entry,
-            "invalidation": invalidation, "quality": round(q, 1)}
+            "invalidation": invalidation, "signal_notes": signal_notes, "quality": round(q, 1)}

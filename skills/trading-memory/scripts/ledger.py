@@ -62,6 +62,8 @@ def cmd_add(args) -> None:
         "reason": args.reason, "from_report": args.from_report,
         "plan_stop": args.plan_stop, "plan_target": args.plan_target,
         "note": args.note,
+        # 账户昵称/名称(如"华宝-XXX");可选,仅用于图上区分,绝不含密码/凭证
+        "account": args.account or None,
         "_ts": datetime.now().isoformat(timespec="seconds"),
     }
     _append(event)
@@ -119,6 +121,48 @@ def _fifo_match(events: list[dict]):
     return closed, positions
 
 
+def daily_trades(code: str) -> list[dict]:
+    """按交易日聚合某只标的的买卖,供 K 图标注 B(纯买)/S(纯卖)/T(同日买卖)。
+    返回按日期升序:[{d, type:'B'|'S'|'T', buy:{avg,qty}|None, sell:{avg,qty}|None, account}]。
+    买=buy/add,卖=trim/sell;当日买卖均有 → T。纯本地读 ledger.jsonl,只读不改。"""
+    code = str(code).zfill(6)
+    by_day: dict[str, dict] = {}
+    for e in _load():
+        if str(e.get("code", "")).zfill(6) != code:
+            continue
+        act = e.get("action")
+        if act not in (BUY_ACTIONS | SELL_ACTIONS):
+            continue
+        d = e.get("date")
+        try:
+            price, sh = float(e["price"]), int(e["shares"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        rec = by_day.setdefault(d, {"buy_amt": 0.0, "buy_qty": 0,
+                                    "sell_amt": 0.0, "sell_qty": 0, "account": None})
+        if act in BUY_ACTIONS:
+            rec["buy_amt"] += price * sh; rec["buy_qty"] += sh
+        else:
+            rec["sell_amt"] += price * sh; rec["sell_qty"] += sh
+        if not rec["account"] and e.get("account"):
+            rec["account"] = e["account"]
+    out = []
+    for d in sorted(by_day):
+        r = by_day[d]
+        buy = {"avg": round(r["buy_amt"] / r["buy_qty"], 3), "qty": r["buy_qty"]} if r["buy_qty"] else None
+        sell = {"avg": round(r["sell_amt"] / r["sell_qty"], 3), "qty": r["sell_qty"]} if r["sell_qty"] else None
+        typ = "T" if (buy and sell) else ("B" if buy else "S")
+        out.append({"d": d, "type": typ, "buy": buy, "sell": sell, "account": r["account"]})
+    return out
+
+
+def open_cost(code: str) -> dict | None:
+    """某只标的的未平仓 FIFO 持仓(avg_cost/shares),无持仓返回 None。供成本线兜底。"""
+    code = str(code).zfill(6)
+    _, positions = _fifo_match(_load())
+    return positions.get(code)
+
+
 def cmd_positions(args) -> None:
     _, positions = _fifo_match(_load())
     print(json.dumps({"open_positions": list(positions.values()),
@@ -173,6 +217,7 @@ def main() -> None:
     a.add_argument("--plan-stop", dest="plan_stop", type=float)
     a.add_argument("--plan-target", dest="plan_target", type=float)
     a.add_argument("--note", default="")
+    a.add_argument("--account", default="", help="账户昵称/名称(可选,如'华宝-XXX');绝不填密码/凭证")
     a.set_defaults(func=cmd_add)
 
     sp = sub.add_parser("positions", help="列出未平仓持仓")

@@ -25,6 +25,7 @@ import chan  # noqa: E402
 import judge  # noqa: E402
 import candle_patterns  # noqa: E402
 import factors  # noqa: E402
+import signals  # noqa: E402  逐日买卖信号(反哺研判)
 from indicators import compute_indicators  # noqa: E402
 from scoring import score_stock  # noqa: E402
 
@@ -164,8 +165,10 @@ def main() -> None:
         flow = fetcher.get_fund_flow(code)
         chan_res = chan.analyze(bars)
         turn_pct = round((bars[-1].get("换手", 0) or 0) * 100, 2)
+        sig = signals.compute(signals.series_from_bars(bars))       # 逐日信号(图上箭头 + 反哺研判)
+        sig_sum = signals.latest_summary(sig, [b["d"] for b in bars])
         jd = judge.synthesize(ind, chip, judge.flow_sum(flow), chan_res,
-                              round(target, 2), dd, turn_pct, strategy=kind)
+                              round(target, 2), dd, turn_pct, strategy=kind, sig=sig_sum)
         import emotion as _emo
         import fundamental as _fnd
         p = {"code": code, "name": name, "sector": f"全局·{kind}", "sector_pct": 0.0,
@@ -174,7 +177,7 @@ def main() -> None:
              "signal": sc["signal"], "score": sc["total"], "breakdown": sc["breakdown"],
              "entry_date": ind["date"], "entry_close": ind["close"],
              "plan_stop": jd["structural_stop"]["stop"], "plan_target": round(target, 2),
-             "indicators": ind, "bars": bars, "chips": chip,
+             "indicators": ind, "bars": bars, "chips": chip, "signals": sig, "signal_summary": sig_sum,
              "chip_comment": chips.control_comment(chip),
              "fund_flow": flow, "judge": jd, "strategy": kind, "shadow": shadow}
         p.update(extra or {})
