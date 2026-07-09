@@ -124,6 +124,12 @@ def _cached(key: str, live_fn, allow_stale: bool = True, accept_cached=None, fre
         raise
 
 
+def _epoch_fresh(fetched_date, fetched_at) -> bool:
+    """EOD 日结数据(指数/大盘regime/资金流/涨停池)的新鲜度:按收盘档期(15:05分界)判定,同日K。
+    根治"盘前抓、盘后用"复用到隔日旧值——这些当日字段盘后才定稿,不能用 is_fresh_today(当天取到即算新鲜)。"""
+    return cache.is_fresh_kline(fetched_at)
+
+
 # ---------------------------------------------------------------------------
 # 板块数据:双源互备。东财(push2 clist)与 DangInvest 各成体系,排名+成分股
 # 各自命名自洽 —— 数据源在"排名"环节一次决定,并通过 _源/_key 串到"成分股",
@@ -321,7 +327,7 @@ def _fund_flow_live(code: str, lmt: int) -> list[dict]:
 def get_fund_flow(code: str, lmt: int = 60) -> list[dict]:
     """个股资金流向(近 lmt 日)。仅东财有;失败回退缓存,再失败返回空列表(报告优雅降级)。"""
     try:
-        return _cached(f"fundflow:{code}", lambda: _fund_flow_live(code, lmt))
+        return _cached(f"fundflow:{code}", lambda: _fund_flow_live(code, lmt), fresh_fn=_epoch_fresh)
     except Exception as e:  # noqa: BLE001
         print(f"    [资金流缺失] {code} —— {e}")
         return []
@@ -331,8 +337,8 @@ def get_zt_pool(date: str | None = None) -> pd.DataFrame:
     """涨停池(默认最近交易日)。date 格式 YYYYMMDD。"""
     key = f"zt_pool:{date or 'latest'}"
     if date:
-        return _cached(key, lambda: _call(ak.stock_zt_pool_em, date=date))
-    return _cached(key, lambda: _call(ak.stock_zt_pool_em))
+        return _cached(key, lambda: _call(ak.stock_zt_pool_em, date=date))  # 指定历史日=不可变,默认新鲜度即可
+    return _cached(key, lambda: _call(ak.stock_zt_pool_em), fresh_fn=_epoch_fresh)  # latest 按档期刷新
 
 
 def get_index_snapshot() -> list[dict]:
@@ -346,7 +352,7 @@ def get_index_snapshot() -> list[dict]:
                         "pct": round((c1 / c0 - 1) * 100, 2),
                         "date": str(df["date"].iloc[-1])})
         return out
-    return _cached("index_snapshot", _live)
+    return _cached("index_snapshot", _live, fresh_fn=_epoch_fresh)
 
 
 def get_index_regime() -> dict:
@@ -369,7 +375,7 @@ def get_index_regime() -> dict:
                 "score_delta": sd, "picks_factor": pf, "oversold_ok": True,
                 "oversold_strict": strict, "note": note}
     try:
-        return _cached("index_regime", _live)
+        return _cached("index_regime", _live, fresh_fn=_epoch_fresh)
     except Exception:  # noqa: BLE001
         return {"level": "未知", "score_delta": 0, "picks_factor": 1.0, "oversold_ok": True,
                 "oversold_strict": False, "note": "大盘数据不可用,按常规处理",
