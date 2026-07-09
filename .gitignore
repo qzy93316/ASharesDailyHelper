@@ -21,6 +21,8 @@ knowledge/*.pptx
 knowledge/*.doc
 knowledge/*.docx
 knowledge/kb/raw/
+# 渲染生成的术语未命中队列(供 expand_glossary 消费的运行时产物,非源文件,不入库避免 diff 噪音)
+knowledge/kb/glossary_misses.json
 
 # ---------- 系统/编辑器 ----------
 .DS_Store
