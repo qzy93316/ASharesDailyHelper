@@ -126,24 +126,31 @@ def diagnose_one(h: dict, cfg: dict) -> dict:
 def _verdict(p, cost, price, stop, pnl_pct, dd, main5, dist_stop=None):
     """成本感知的规则化诊断(透明可核,非喊单)。返回 (文字, 标签)。"""
     ind, jd = p["indicators"], p["judge"]
-    stance = jd.get("stance", "")
-    weak = ("偏弱" in stance) or (ind.get("alignment") in ("空头排列", "弱空"))
+    # 强弱判定单源:以均线排列为准(stance 本就由 alignment 派生,不再匹配 stance 文案,避免文案一改就误判)
+    weak = ind.get("alignment") in ("空头排列", "弱空")
     outflow = main5 < 0
     below_stop = stop and price <= stop
+    grey = jd.get("grey") or []  # 灰区预警(RSI偏热/乖离接近追高/换手过高)—— 落地到诊断,不再只在报告角落显示
+
+    def _ret(text, tag):
+        if grey and tag not in ("止损", "重亏警戒"):  # 已到重警级别就不再叠加灰区,免噪音
+            text += ";灰区预警:" + "、".join(grey)
+        return text, tag
+
     if below_stop:
-        return (f"⛔ 已跌破结构止损 {stop}({jd['structural_stop'].get('basis','')}),"
-                f"纪律上应减仓/离场,勿扛单", "止损")
+        return _ret(f"⛔ 已跌破结构止损 {stop}({jd['structural_stop'].get('basis','')}),"
+                    f"纪律上应减仓/离场,勿扛单", "止损")
     if pnl_pct is not None and pnl_pct <= -dd * 1.5:
-        return (f"⚠️ 浮亏 {pnl_pct}% 已超止损容忍({dd}%)近1.5倍,趋势未反转前不宜补仓摊低,"
-                f"反弹优先减亏;结构止损 {stop}", "重亏警戒")
+        return _ret(f"⚠️ 浮亏 {pnl_pct}% 已超止损容忍({dd}%)近1.5倍,趋势未反转前不宜补仓摊低,"
+                    f"反弹优先减亏;结构止损 {stop}", "重亏警戒")
     if weak and outflow:
-        return (f"🔻 趋势偏弱 + 主力近5日净流出{main5}万,反弹到压力/成本区减仓为主,不追不补;"
-                f"守 {stop}", "逢反弹减")
+        return _ret(f"🔻 趋势偏弱 + 主力近5日净流出{main5}万,反弹到压力/成本区减仓为主,不追不补;"
+                    f"守 {stop}", "逢反弹减")
     if (not weak) and main5 > 0:
-        return (f"✅ 结构相对健康 + 资金未流出,可持有;跌破结构止损 {stop} 再离场", "持有")
+        return _ret(f"✅ 结构相对健康 + 资金未流出,可持有;跌破结构止损 {stop} 再离场", "持有")
     if weak and main5 > 0:
-        return (f"👀 趋势偏弱但主力逆势吸筹({main5}万),持有观察,严守 {stop}", "持有观察")
-    return (f"持有观察,以结构止损 {stop} 为纪律线(现价距止损 {dist_stop if dist_stop is not None else '-'}%)", "观察")
+        return _ret(f"👀 趋势偏弱但主力逆势吸筹({main5}万),持有观察,严守 {stop}", "持有观察")
+    return _ret(f"持有观察,以结构止损 {stop} 为纪律线(现价距止损 {dist_stop if dist_stop is not None else '-'}%)", "观察")
 
 
 def portfolio_summary(picks: list[dict], cash: float | None = None) -> dict:
