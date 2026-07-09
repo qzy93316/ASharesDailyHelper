@@ -149,6 +149,18 @@ def build_watchlist(date: str) -> list[dict]:
             else:
                 add(code, name, h["trigger"], "down", "🎯回踩加",
                     f"回踩到 {h['trigger']},{h['action']}")
+        # 均线阶梯告警(ma_ladder,信号层):破 MA5 减半 / MA10 全减 / MA20 波段减 / MA60 离场 + 偏离MA5高抛。
+        # 已跌破的下行线跳过(现价早在线下,无新鲜穿越,不刷屏);结构止损仍是独立的清仓底线。
+        lad = h.get("ladder") or {}
+        broken = set(lad.get("broken") or [])
+        for r in (lad.get("rungs") or []):
+            if r["dir"] == "down":
+                if r["line"] in broken:
+                    continue
+                add(code, name, r["price"], "down", f"📉破{r['line']}",
+                    f"跌破{r['line']}({r['price']})→{r['action']}[{r['ratio']}·{r['tier']}]")
+            else:  # 高抛做T(偏离MA5>5%,向上穿越触发)
+                add(code, name, r["price"], "up", "📈高抛做T", f"{r['action']} {r['price']}({r['why']})")
     for p_ in ap.get("pool", []):
         code, name, act = p_["code"], p_["name"], p_.get("action", "")
         add(code, name, p_.get("stop"), "down", "⛔止损", f"跌破止损 {p_.get('stop')}")
@@ -342,6 +354,19 @@ def run(date: str, interval: int, once: bool, cfg: dict) -> None:
                         if popup:
                             fired[pkey] = fired.get(pkey, 0) + 1
                         _emit(alerts_log, now, "💥炸板", name, code, price, f"涨停开板(涨停价{lu})", popup)
+            # 当日涨幅>5% 未涨停 → 高抛做T(均线战法 T2/S1,现算:看盘中涨幅不看收盘)
+            pct = s.get("pct")
+            not_zt = not (lu and price >= lu - 0.01)
+            if pct is not None and pct >= 5 and not_zt:
+                k = (code, "涨幅高抛", _bucket(now))
+                if fired.get(k, 0) < max_per:
+                    fired[k] = fired.get(k, 0) + 1
+                    pkey = ("POP", code, _bucket(now))
+                    popup = fired.get(pkey, 0) < max_per
+                    if popup:
+                        fired[pkey] = fired.get(pkey, 0) + 1
+                    _emit(alerts_log, now, "📈涨幅高抛", name, code, price,
+                          f"当日涨幅 {pct}%>5% 未涨停,短线高抛做T(不看收盘)", popup)
         try:
             write_chart(date, series, snaps, wl, alerts_log)
         except Exception as e:  # noqa: BLE001
