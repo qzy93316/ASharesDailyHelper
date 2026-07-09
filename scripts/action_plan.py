@@ -24,6 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import judge  # noqa: E402  均线阶梯减仓纪律(信号层)
+import indicators  # noqa: E402  强弱研判单一真源 strength()
 
 ROOT = Path(__file__).parent.parent
 
@@ -87,7 +88,6 @@ def _pool_action(p):
     jd = p.get("judge") or {}
     rr = (jd.get("risk_reward") or {}).get("rr", 0)
     q = jd.get("quality", 0)
-    align = i.get("alignment", "")
     bias, ma10, close = i.get("bias5"), i.get("ma10"), i.get("close")
     stop = (jd.get("structural_stop") or {}).get("stop")
     target = p.get("plan_target") or i.get("pressure")
@@ -105,7 +105,7 @@ def _pool_action(p):
     if bias is not None and bias >= 3:
         return {"action": "逢低吸", "plan_price": ma10, **common,
                 "note": f"乖离{bias}%偏高,等回踩 MA10({ma10}) 再介入"}
-    if ma10 and close and close >= ma10 and align in ("多头排列", "弱多"):
+    if ma10 and close and close >= ma10 and indicators.strength(i)["bull"]:
         return {"action": "建仓", "plan_price": ma10, **common,
                 "note": f"站稳 MA10({ma10}),介入止损 {stop},目标 {target}"}
     if ma10 and close and close < ma10:

@@ -105,6 +105,18 @@ checks += [
     ("均线阶梯:偏离MA5>5%触发高抛做T", any(r["action"] == "高抛做T" for r in _lad_bias["rungs"])),
     ("结构止损:贴支撑放宽到止损距≥3.5%", _ss_tight["dist_pct"] >= 3.5 - 1e-9),
 ]
+# ── 强弱研判单一真源 indicators.strength():与旧 `align in (...)` 口径逐值等价 ──
+from indicators import strength as _strength  # noqa: E402
+_str_ok = all(
+    _strength({"alignment": a})["bull"] == (a in ("多头排列", "弱多"))
+    and _strength({"alignment": a})["weak"] == (a in ("空头排列", "弱空"))
+    and _strength({"alignment": a})["strong"] == (a == "多头排列")
+    for a in ("多头排列", "弱多", "弱空", "空头排列"))
+checks += [
+    ("strength 与旧align口径逐值等价", _str_ok),
+    ("strength bull/weak 四值互补", all(_strength({"alignment": a})["bull"] != _strength({"alignment": a})["weak"]
+                                    for a in ("多头排列", "弱多", "弱空", "空头排列"))),
+]
 # ── diagnose 强弱单源 + grey 落地 ──
 import diagnose_portfolio as _dp  # noqa: E402
 _p_hold = {"indicators": {"alignment": "多头排列", "close": 10.0},

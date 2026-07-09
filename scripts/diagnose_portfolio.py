@@ -26,6 +26,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent))
 import fetcher  # noqa: E402
 import analyze  # noqa: E402  复用 analyze_one(指标+筹码+资金+情绪+基本面+研判)
+import indicators  # noqa: E402  强弱研判单一真源 strength()
 
 ROOT = Path(__file__).parent.parent
 PORT_DIR = ROOT / "portfolio"
@@ -126,8 +127,8 @@ def diagnose_one(h: dict, cfg: dict) -> dict:
 def _verdict(p, cost, price, stop, pnl_pct, dd, main5, dist_stop=None):
     """成本感知的规则化诊断(透明可核,非喊单)。返回 (文字, 标签)。"""
     ind, jd = p["indicators"], p["judge"]
-    # 强弱判定单源:以均线排列为准(stance 本就由 alignment 派生,不再匹配 stance 文案,避免文案一改就误判)
-    weak = ind.get("alignment") in ("空头排列", "弱空")
+    # 强弱判定走单一真源 indicators.strength(以均线排列为准),不再匹配 stance 文案,避免文案一改就误判
+    weak = indicators.strength(ind)["weak"]
     outflow = main5 < 0
     below_stop = stop and price <= stop
     grey = jd.get("grey") or []  # 灰区预警(RSI偏热/乖离接近追高/换手过高)—— 落地到诊断,不再只在报告角落显示

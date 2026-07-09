@@ -13,6 +13,8 @@
 """
 from __future__ import annotations
 
+from indicators import strength  # 强弱研判单一真源(bull/weak/strong)
+
 
 def _f(v):
     return None if v is None else round(float(v), 2)
@@ -105,9 +107,9 @@ def risk_reward(close, stop, target):
 
 def _tensions(ind, chip, fs):
     t = []
-    align = ind.get("alignment", "")
+    st = strength(ind)
     rsi, bias, vr = ind.get("rsi6"), ind.get("bias5"), ind.get("vol_ratio", 1) or 1
-    bullish = align in ("多头排列", "弱多")
+    bullish = st["bull"]
     if bullish and rsi is not None and rsi >= 65:
         t.append(f"趋势健康但 RSI{rsi} 偏高,短线过热,追高易套")
     if bullish and bias is not None and bias >= 3 and vr >= 1.5:
@@ -124,7 +126,7 @@ def _tensions(ind, chip, fs):
             t.append(f"获利比例{prof}%,几乎全员浮盈,上方抛压重,防兑现")
         elif prof is not None and prof <= 15 and bullish:
             t.append(f"获利比例仅{prof}%,上方套牢盘重,反弹到套牢区易受阻")
-    if align in ("空头排列", "弱空") and rsi is not None and rsi <= 35:
+    if st["weak"] and rsi is not None and rsi <= 35:
         t.append(f"空头排列+RSI{rsi}超卖,或有超跌反弹,但趋势未反转属左侧博弈")
     return t
 
@@ -183,17 +185,17 @@ def synthesize(ind, chip, fs, chan_res, target, dd_pct, turn_pct=None, strategy=
     rr = risk_reward(close, ss["stop"], target)
     tensions = _tensions(ind, chip, fs)
     grey = _grey(ind, turn_pct)
-    align = ind.get("alignment", "")
+    st = strength(ind)
     rsi, bias = ind.get("rsi6"), ind.get("bias5")
     ma10 = ind.get("ma10")
 
     if strategy == "超跌回调":
         stance = "超跌企稳,左侧低吸候选(趋势未反转,轻仓试)"
-    elif align == "多头排列" and (bias is None or bias < 3) and (rsi is None or rsi < 65):
+    elif st["strong"] and (bias is None or bias < 3) and (rsi is None or rsi < 65):
         stance = "顺势多头,结构健康,回踩可介入"
-    elif align in ("多头排列", "弱多"):
+    elif st["bull"]:
         stance = "偏多但短线有透支,不宜追高、等回踩"
-    elif align in ("空头排列", "弱空"):
+    elif st["weak"]:
         stance = "趋势偏弱,反弹为主、不宜恋战"
     else:
         stance = "多空交织,观望为宜"
@@ -211,12 +213,12 @@ def synthesize(ind, chip, fs, chan_res, target, dd_pct, turn_pct=None, strategy=
 
     signal_notes, fb, fbr = _signal_notes(sig, chan_res)
     # 偏空信号在多头结构里出现 → 补一条矛盾(动能与趋势背离预警)
-    bullish = align in ("多头排列", "弱多")
+    bullish = st["bull"]
     if bullish and fbr and not fb:
         tensions.append("趋势偏多但近端出现卖出信号(" + "、".join(signal_notes) + "),动能转弱预警")
 
     q = min(rr["rr"], 3) * 10 - len(tensions) * 4 - (6 if ss["too_far"] else 0)
-    q += 6 if align == "多头排列" else (2 if align == "弱多" else 0)
+    q += 6 if st["strong"] else (2 if st["bull"] else 0)
     q += min(fb, 2) * 2 - min(fbr, 2) * 2   # 新近买入共振加分、卖出信号减分(封顶±4)
 
     return {"stance": stance, "structural_stop": ss, "risk_reward": rr,

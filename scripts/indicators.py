@@ -83,3 +83,21 @@ def compute_indicators(df: pd.DataFrame) -> dict:
         "bias5": round(float(bias5), 2),
         "support": float(support), "pressure": float(pressure),
     }
+
+
+# 强弱研判"原子":全项目统一的趋势强弱判定,一律以均线排列 alignment 为准。
+# judge/diagnose/action_plan 的 bull/weak/strong 判定都走这里,消除各处 `align in (...)` 口径漂移。
+_BULL_ALIGN = ("多头排列", "弱多")
+_WEAK_ALIGN = ("空头排列", "弱空")
+
+
+def strength(ind: dict) -> dict:
+    """趋势强弱单一真源。bull/weak 互补(alignment 恒为四值之一);strong 专指多头排列。
+    grade 供展示统一口径,不参与决策。"""
+    align = ind.get("alignment", "")
+    return {"align": align,
+            "bull": align in _BULL_ALIGN,
+            "weak": align in _WEAK_ALIGN,
+            "strong": align == "多头排列",
+            "grade": {"多头排列": "强多", "弱多": "偏多",
+                      "弱空": "偏弱", "空头排列": "弱势"}.get(align, "中性")}
