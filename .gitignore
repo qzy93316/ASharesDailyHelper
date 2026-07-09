@@ -18,6 +18,8 @@ portfolio/
 # ---------- 版权资料(仅保留蒸馏后的规则文件,原书/提取物不分发) ----------
 knowledge/*.pdf
 knowledge/*.pptx
+knowledge/*.doc
+knowledge/*.docx
 knowledge/kb/raw/
 
 # ---------- 系统/编辑器 ----------
