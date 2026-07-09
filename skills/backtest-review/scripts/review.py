@@ -57,6 +57,7 @@ def _normalize_intraday(p: dict, sidecar: dict) -> dict:
     q.setdefault("plan_target", round(close * (1 + tgt_pct / 100), 2) if close else None)
     q.setdefault("entry_date", str(sidecar.get("date", "")))
     q.setdefault("strategy", "超短线")
+    q.setdefault("target_basis", f"固定{tgt_pct:.0f}%止盈")  # 盘中池目标口径,区别于结构压力位
     return q
 
 
@@ -105,6 +106,7 @@ def evaluate_pick(pick: dict, hold: int) -> dict:
             "score": pick.get("score"), "entry": entry, "stop": stop, "target": target,
             "pool": pick.get("pool", "?"),
             "strategy": pick.get("strategy", ""), "shadow": pick.get("shadow", False),
+            "target_basis": pick.get("target_basis") or "结构压力位",  # 目标口径,跨池比胜率时须区分
             "factor_keys": factor_keys}
     fut = _bars_after(code, pick["entry_date"], hold)
     if fut is None or len(fut) == 0 or not entry:
@@ -180,9 +182,11 @@ def _by_pool(rows: list[dict]) -> dict:
     out = {}
     for k, rs in g.items():
         d = [x for x in rs if not x.get("pending")]
+        bases = sorted({x.get("target_basis") or "结构压力位" for x in rs})
         out[k] = {"n": len(d),
                   "win_rate_pct": round(sum(1 for x in d if x["success"]) / len(d) * 100, 1) if d else None,
-                  "pending": sum(1 for x in rs if x.get("pending"))}
+                  "pending": sum(1 for x in rs if x.get("pending")),
+                  "target_basis": "/".join(bases)}
     return out
 
 
@@ -203,7 +207,11 @@ def _write_md(title: str, rows: list[dict], summ: dict, hold: int) -> Path:
         bp = _by_pool(rows)
         if len([k for k in bp if k != "?"]) > 1:
             L += ["**分池命中率**:" + " · ".join(
-                f"{k} {v['win_rate_pct']}%({v['n']}只)" for k, v in bp.items() if v['n']), ""]
+                f"{k} {v['win_rate_pct']}%({v['n']}只,目标={v['target_basis']})" for k, v in bp.items() if v['n'])]
+            if len({v["target_basis"] for v in bp.values() if v["n"]}) > 1:
+                L.append("> ⚠️ 各池**目标口径不同**(盘中池按固定%止盈、荐股/全局池按结构压力位),"
+                         "命中率是不同的尺子量的,**不宜直接横比**;同池纵向比趋势更可靠。")
+            L.append("")
     else:
         L += ["## 汇总", "", "本期暂无可验证标的(荐股日之后尚无足够交易日)。", ""]
     L += ["## 逐只明细", "",
