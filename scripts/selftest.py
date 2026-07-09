@@ -93,6 +93,34 @@ checks += [
     ("卖出信号评分≤无信号基线", _sc_sell["total"] <= _sc_none["total"]),
     ("不传sig与旧行为一致(无信号确认项)", "信号确认" not in _sc_none["breakdown"]),
 ]
+# ── 均线阶梯减仓 + 结构止损容错下限(kb/ma-code-rules.md 接入) ──
+_lad = _judge.ma_ladder({"close": 100.0, "ma5": 98.0, "ma10": 95.0, "ma20": 90.0, "ma60": 80.0, "bias5": 2.0})
+_lad_lines = [r["line"] for r in _lad["rungs"]]
+_lad_bias = _judge.ma_ladder({"close": 100.0, "ma5": 94.0, "ma10": 92.0, "ma20": 88.0, "ma60": 80.0, "bias5": 6.4})
+_ss_tight = _judge.structural_stop({"close": 100.0, "support": 99.0, "ma20": 90.0, "ma10": 98.5}, None, 8)
+checks += [
+    ("均线阶梯:多头未破线时无已破档", _lad["broken"] == []),
+    ("均线阶梯:含MA5/MA10/MA20/MA60四档", all(x in _lad_lines for x in ("MA5", "MA10", "MA20", "MA60"))),
+    ("均线阶梯:最近减仓位为下方MA5", bool(_lad["next"]) and _lad["next"]["line"] == "MA5"),
+    ("均线阶梯:偏离MA5>5%触发高抛做T", any(r["action"] == "高抛做T" for r in _lad_bias["rungs"])),
+    ("结构止损:贴支撑放宽到止损距≥3.5%", _ss_tight["dist_pct"] >= 3.5 - 1e-9),
+]
+# ── diagnose 强弱单源 + grey 落地 ──
+import diagnose_portfolio as _dp  # noqa: E402
+_p_hold = {"indicators": {"alignment": "多头排列", "close": 10.0},
+           "judge": {"stance": "顺势多头", "structural_stop": {"stop": 9.0, "basis": "MA20"},
+                     "grey": ["RSI68 进入偏热区(65-80)"]}}
+_txt_hold, _tag_hold = _dp._verdict(_p_hold, 9.5, 10.0, 9.0, 5.26, 8, 1000, 11.0)
+_p_stop = {"indicators": {"alignment": "空头排列", "close": 8.9},
+           "judge": {"stance": "趋势偏弱", "structural_stop": {"stop": 9.0, "basis": "MA20"},
+                     "grey": ["换手30% 过高"]}}
+_txt_stop, _tag_stop = _dp._verdict(_p_stop, 9.5, 8.9, 9.0, -6.3, 8, -1000, -1.1)
+checks += [
+    ("诊断 grey 落地到持有类文字", "灰区预警" in _txt_hold),
+    ("诊断 止损类不叠加 grey 噪音", "灰区预警" not in _txt_stop),
+    ("诊断 weak 单源:多头非弱→持有", _tag_hold == "持有"),
+    ("诊断 weak 单源:空头破止损→止损", _tag_stop == "止损"),
+]
 # ── 信号有效性回测(signal_backtest.backtest_bars):V形序列前向收益+胜率+末端剔除 ──
 import signal_backtest as _sbt  # noqa: E402
 def _mkbars(seq):
