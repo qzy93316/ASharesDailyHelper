@@ -133,6 +133,26 @@ checks += [
     ("诊断 weak 单源:多头非弱→持有", _tag_hold == "持有"),
     ("诊断 weak 单源:空头破止损→止损", _tag_stop == "止损"),
 ]
+# ── 反转候选检测器 reversal ──
+import reversal as _rev  # noqa: E402
+# 缺口:今低>昨高=向上跳空
+_gap_up = _rev.detect_gap([{"o": 10, "c": 10, "l": 9.9, "h": 10.1},
+                           {"o": 10.3, "c": 10.5, "l": 10.2, "h": 10.6}])
+# 低位量增:空头排列 + 量比高 + 价平 → 命中"低位量增"
+_ind_lv = {"alignment": "空头排列", "close": 8.0, "vol_ratio": 2.0, "pct_chg": 0.5,
+           "support": 7.8, "pressure": 9.0}
+_bars_lv = [{"o": 8, "c": 8, "l": 7.9, "h": 8.1} for _ in range(60)]
+_sig_lv = _rev.reversal_signals(_ind_lv, _bars_lv, None)
+# 底背离 + 低位量增 双共振 → 反转候选
+_cand = _rev.is_reversal_candidate(_ind_lv, _bars_lv, {"divergence": {"bs": "1B"}}, min_signals=2)
+# 单信号不成候选
+_cand_one = _rev.is_reversal_candidate(_ind_lv, _bars_lv, None, min_signals=2)
+checks += [
+    ("reversal 向上跳空识别", bool(_gap_up) and _gap_up["dir"] == "up"),
+    ("reversal 低位量增命中", "低位量增" in _sig_lv),
+    ("reversal ≥2共振成反转候选", bool(_cand) and _cand["n"] >= 2 and "底背离" in _cand["signals"]),
+    ("reversal 单信号不成候选", _cand_one is None),
+]
 # ── 信号有效性回测(signal_backtest.backtest_bars):V形序列前向收益+胜率+末端剔除 ──
 import signal_backtest as _sbt  # noqa: E402
 def _mkbars(seq):

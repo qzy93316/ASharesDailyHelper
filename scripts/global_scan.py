@@ -26,6 +26,7 @@ import judge  # noqa: E402
 import candle_patterns  # noqa: E402
 import factors  # noqa: E402
 import signals  # noqa: E402  逐日买卖信号(反哺研判)
+import reversal  # noqa: E402  左侧反转候选检测器(第三路)
 from indicators import compute_indicators  # noqa: E402
 from scoring import score_stock  # noqa: E402
 
@@ -183,7 +184,7 @@ def main() -> None:
         p.update(extra or {})
         return p
 
-    trend, oversold, dropped = [], [], 0
+    trend, oversold, reversal_picks, dropped = [], [], [], 0
     for _, row in cand.iterrows():
         code, name = str(row["代码"]).zfill(6), row.get("名称", row["代码"])
         if code in hot_codes:
@@ -255,6 +256,19 @@ def main() -> None:
                                             shadow=True, extra={"rps": rps, "zt60": zt,
                                             "accumulating": ff["accumulating"], "stabil_signal": sig,
                                             "factors": {"fund": ff} if ff.get("note") else {}}))
+            # ③ 反转候选(第三路,shadow):趋势/超跌都没收 + ≥2 反转信号共振 + 评分≥40。
+            #    收口 scoring 追涨盲区(底背离/低位量增/突破缺口/强支撑),便宜信号先筛、命中才算 chan。
+            already_os = bool(oversold) and oversold[-1]["code"] == code
+            if not already_os and sc["total"] >= 40 and reversal.reversal_signals(ind, bars, None):
+                res_r = chan.analyze(bars)
+                cand_r = reversal.is_reversal_candidate(ind, bars, res_r, min_signals=2)
+                if cand_r:
+                    sup_r = ind.get("support") or close * 0.95
+                    stop_r = round(min(sup_r * 0.98, close * (1 - dd / 100)), 2)
+                    reversal_picks.append(_mk(code, name, ind, sc, bars, "反转候选", stop_r, ind["pressure"],
+                                              shadow=True, extra={"rps": rps, "zt60": zt,
+                                              "rev_signals": cand_r["signals"], "rev_n": cand_r["n"],
+                                              "stabil_signal": "反转共振:" + "、".join(cand_r["signals"])}))
         except Exception as e:  # noqa: BLE001
             print(f"  跳过 {name}({code}): {e}")
     print(f"  (因子/黑名单剔除 {dropped} 只)")
@@ -263,9 +277,12 @@ def main() -> None:
     # 超跌路排序:强企稳信号优先(底背离>见底K线>收阳),同级越超卖越靠前
     _sig_rank = {"底背离1B": 0, "见底K线": 1, "收阳企稳": 2}
     oversold.sort(key=lambda p: (_sig_rank.get(p.get("stabil_signal"), 3), p["indicators"]["rsi6"]))
-    picks = trend[:cap_each] + oversold[:cap_each]
+    # 反转路排序:共振信号越多越靠前,同级评分高优先
+    reversal_picks.sort(key=lambda p: (p.get("rev_n", 0), p["score"]), reverse=True)
+    picks = trend[:cap_each] + oversold[:cap_each] + reversal_picks[:cap_each]
 
-    print(f"[3/3] 输出(趋势 {len(trend[:cap_each])} + 超跌影子 {len(oversold[:cap_each])})...")
+    print(f"[3/3] 输出(趋势 {len(trend[:cap_each])} + 超跌影子 {len(oversold[:cap_each])} "
+          f"+ 反转候选 {len(reversal_picks[:cap_each])})...")
     import emotion
     emo = emotion.latest_snapshot()  # 情绪周期(影子:只写侧车展示,不 gate)
     out = {"date": args.date, "source": "全局扫描", "scanned": len(cand),
