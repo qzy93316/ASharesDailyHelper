@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+import judge  # noqa: E402  均线阶梯减仓纪律(信号层)
 
 ROOT = Path(__file__).parent.parent
 
@@ -97,8 +98,10 @@ def _pool_action(p):
         return {"action": "观察(超跌影子)", "plan_price": (jd.get("structural_stop") or {}).get("support_ref"),
                 **common, "note": "左侧超跌企稳候选,仅轻仓试,不追"}
     if rr is not None and rr < 1:
+        sig = p.get("signal", "")
         return {"action": "放弃", "plan_price": None, **common,
-                "note": f"盈亏比 {rr}<1 不值博,放弃或等更好点位"}
+                "note": f"评分信号[{sig}]但盈亏比 {rr}<1 → 放弃(评分看强弱、盈亏比看值不值,后者一票否决);"
+                        f"非看空,等回踩出更优盈亏比再说"}
     if bias is not None and bias >= 3:
         return {"action": "逢低吸", "plan_price": ma10, **common,
                 "note": f"乖离{bias}%偏高,等回踩 MA10({ma10}) 再介入"}
@@ -145,14 +148,17 @@ def build_action_plan(date: str, focus: str | None = None) -> dict:
             if not _match_focus(p, focus if focus not in ("持仓", "荐股") else None):
                 continue
             act = _holding_action(p)
-            price = (p.get("indicators") or {}).get("close")
+            ind = p.get("indicators") or {}
+            price = ind.get("close")
             trig = act.get("trigger")
             dist = round((trig / price - 1) * 100, 1) if (trig and price) else None  # 现价到触发价%
+            ladder = judge.ma_ladder(ind) if price else None  # 均线阶梯减仓(信号层,清仓底线仍归结构止损)
             holdings.append({"code": p["code"], "name": p["name"], "cost": p.get("cost"),
                              "price": price, "mktval": p.get("mktval"),
                              "pnl_pct": p.get("pnl_pct"), "tag": p.get("holding_tag"),
                              "signal": p.get("signal"), "dist_to_trigger": dist,
-                             "emotion": ((p.get("stock_emotion") or {}).get("grade")), **act})
+                             "emotion": ((p.get("stock_emotion") or {}).get("grade")),
+                             "ladder": ladder, **act})
     if scope_pool:
         seen = {h["code"] for h in holdings}
         for src in (daily, glob):
@@ -223,6 +229,22 @@ def render_md(ap: dict) -> str:
                      f"{h.get('pnl_pct')}% | {round(h['mktval']) if h.get('mktval') else '—'} | "
                      f"**{h['action']}** | {trig_disp} | {h.get('stop')} | "
                      f"{h.get('ratio')} | {h['note']} |")
+        # 均线阶梯减仓(信号层)—— 分两层:均线阶梯管减仓节奏,结构止损管清仓底线
+        rows = [h for h in ap["holdings"] if h.get("ladder") and h["ladder"].get("rungs")]
+        if rows:
+            L += ["", "### 减仓阶梯(均线纪律 · 信号层)", "",
+                  "> 短线看 MA5/MA10、波段看 MA20/MA60;**先减半再全减,阶梯执行**。"
+                  "结构止损为**清仓底线**,与阶梯分两层——阶梯管节奏、止损管底线。⚠️=现价已跌破该线(纪律上早该减到此档)。", ""]
+            for h in rows:
+                lad = h["ladder"]
+                broken = set(lad.get("broken") or [])
+                parts = []
+                for r in lad["rungs"]:
+                    flag = "⚠️" if (r["dir"] == "down" and r["line"] in broken) else ""
+                    arrow = "↑" if r["dir"] == "up" else "↓"
+                    parts.append(f"{flag}{arrow}破{r['line']}({r['price']})→{r['action']}[{r['ratio']}]")
+                parts.append(f"破结构止损({h.get('stop')})→**清仓底线**")
+                L.append(f"- **{h['name']}** 现{h.get('price')}:" + " · ".join(parts))
     if ap["pool"]:
         L += ["", "## 荐股端动作", "",
               "| 股票 | 池/板块 | 信号 | 动作 | 计划价 | 止损 | 目标 | 盈亏比 | 依据 |",
