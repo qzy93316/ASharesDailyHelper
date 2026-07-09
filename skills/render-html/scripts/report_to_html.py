@@ -436,9 +436,22 @@ function chanTip(c,d,hr){
  if(c.divergence&&c.divergence.d===d)parts.push((bsmap[c.divergence.bs]||c.divergence.bs)+'('+c.divergence.type+')');
  var line1=parts.length?"<div style='color:#ffd43b'>📐 缠论:"+parts.join(' · ')+"</div>":'';
  var info=[];
- var seg=(c.segments||[]);if(seg.length)info.push('线段 '+(seg[seg.length-1].dir==='up'?'向上':'向下'));
- var bi=(c.bi||[]);if(bi.length)info.push('笔 '+(bi[bi.length-1].type==='top'?'向上':'向下'));
- var zs=(c.zhongshu||[]);if(zs.length){var z=zs[zs.length-1];info.push('最新中枢 '+z.zd+'~'+z.zg);}
+ // 按"当日所属结构"取方向(而非一律取全局最后一段/笔),末端未完成结构顺延最新方向
+ var seg=(c.segments||[]);
+ if(seg.length){var sd=null;
+   for(var si=0;si<seg.length;si++){if(seg[si].d_start<=d&&d<=seg[si].d_end){sd=seg[si].dir;break;}}
+   if(sd===null)sd=(d>seg[seg.length-1].d_end)?seg[seg.length-1].dir:seg[0].dir;
+   info.push('线段 '+(sd==='up'?'向上':'向下'));}
+ var bi=(c.bi||[]);
+ if(bi.length){var k=-1;for(var bj=0;bj<bi.length;bj++){if(bi[bj].d<=d)k=bj;else break;}
+   // 笔方向与 chan.py 摘要同口径:自底分型起为向上、自顶分型起为向下(d 在首点前则迎向首点)
+   var bdir=(k<0)?(bi[0].type==='top'?'向上':'向下'):(bi[k].type==='bottom'?'向上':'向下');
+   info.push('笔 '+bdir);}
+ var zs=(c.zhongshu||[]);
+ if(zs.length){var z=null;
+   for(var zi=0;zi<zs.length;zi++){if(zs[zi].d_start<=d&&d<=zs[zi].d_end){z=zs[zi];break;}}
+   if(!z){for(var zk=0;zk<zs.length;zk++){if(zs[zk].d_start<=d)z=zs[zk];}}
+   if(z)info.push((z.d_start<=d&&d<=z.d_end?'中枢 ':'最近中枢 ')+z.zd+'~'+z.zg);}
  var line2=info.length?"<div style='color:#aebbd4'>"+info.join(' · ')+"</div>":'';
  return (line1||line2)?hr+line1+line2:'';
 }
