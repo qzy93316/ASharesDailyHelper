@@ -49,15 +49,27 @@ def _fetch_universe():
         return df
 
 
-def _universe(ttl_days: int):
-    """全市场快照(带 TTL 缓存):清单落库,ttl_days 内直接用缓存,避免每次重拉 5000 只。"""
-    df, fdate = cache.load_aged("universe_snapshot", ttl_days)
-    if df is not None:
-        print(f"  [清单缓存] 复用 {fdate} 的全市场快照({len(df)} 只),未重拉")
-        return df, bool(df["_全字段"].iloc[0]) if "_全字段" in df else False
-    df = _fetch_universe()
-    cache.save("universe_snapshot", df)
-    return df, bool(df["_全字段"].iloc[0]) if "_全字段" in df else False
+def _universe():
+    """全市场快照:按"交易日档期"(15:05 分界,同 is_fresh_kline)刷新。
+    预筛(_prefilter)要用快照里的**当日**涨跌幅/成交额挑候选(超跌路取当日跌幅最深、趋势路取成交额top),
+    所以这些**每日变动**字段必须是当前档期数据——不能用周级日历TTL吃隔日旧值(否则拿5天前的当日行情挑今天的候选)。
+    单次接口调用(spot 一把返回全市场,成本可忽略);实时拉取失败则回退最近一次陈旧快照(韧性)。"""
+    def _has60(d):
+        return bool(d["_全字段"].iloc[0]) if "_全字段" in d else False
+    data, fdate, fat = cache.load_meta("universe_snapshot")
+    if data is not None and cache.is_fresh_kline(fat):  # 与当前处于同一交易日档期 → 复用
+        print(f"  [清单缓存] 复用本档期快照({fdate},{len(data)} 只),未重拉")
+        return data, _has60(data)
+    try:
+        df = _fetch_universe()
+        cache.save("universe_snapshot", df)
+        return df, _has60(df)
+    except Exception as e:  # noqa: BLE001  实时失败 → 回退陈旧(能跑完优先),明确告警
+        if data is not None:
+            age = (dt.date.today() - dt.date.fromisoformat(fdate)).days if fdate else "?"
+            print(f"  [清单缓存] 实时拉取失败({e}),回退 {fdate} 陈旧快照(龄 {age} 天,当日字段可能失真)")
+            return data, _has60(data)
+        raise
 
 
 def _is_excluded(name: str, code: str, fl: dict) -> bool:
@@ -133,7 +145,7 @@ def main() -> None:
           f"超跌路{'严格影子(仅底背离)' if oversold_strict else '开'}")
 
     print("[1/3] 拉全市场快照(带TTL缓存)...")
-    df, has_60d = _universe(int(gs.get("universe_ttl_days", 5)))
+    df, has_60d = _universe()
     cand = _prefilter(df, has_60d, fl, cap, min_60d)
     os_rsi = float(gs.get("oversold_rsi", 35))
     os_bias = float(gs.get("oversold_bias", -8))
