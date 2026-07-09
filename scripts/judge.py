@@ -29,9 +29,12 @@ def flow_sum(flow):
     return out
 
 
+MIN_STOP_PCT = 3.5  # 最小止损距下限(%):贴支撑时结构止损可被压到 ~2%,短线一插针即出局(2026-07-09 复盘实证:止损距<3% 的标的当日全为假摔),故设容错下限
+
+
 def structural_stop(ind, chan_res, dd_pct):
     """结构化止损:现价下方最近的真实支撑(20日支撑/MA20/MA10/中枢下沿/缠论支撑)- 1.5%缓冲;
-    与 -dd% 硬止损比较,结构止损更深则用硬止损保护;止损距离过远则预警。"""
+    止损距不足 MIN_STOP_PCT 则放宽到容错下限;与 -dd% 硬止损比较,结构止损更深则用硬止损保护;止损距离过远则预警。"""
     close = ind["close"]
     cands = []
     for key, label in [("support", "20日支撑"), ("ma20", "MA20"), ("ma10", "MA10")]:
@@ -46,9 +49,12 @@ def structural_stop(ind, chan_res, dd_pct):
         if sr and sr < close:
             cands.append((float(sr), "缠论支撑"))
     hard = round(close * (1 - dd_pct / 100), 2)
+    floor = round(close * (1 - MIN_STOP_PCT / 100), 2)  # 容错下限:止损距至少 MIN_STOP_PCT
     if cands:
         sup, src = max(cands, key=lambda x: x[0])  # 最近(最高)的下方支撑
         stop = round(sup * 0.985, 2)
+        if stop > floor:  # 结构止损贴脸(距<MIN_STOP_PCT),放宽到容错下限,避免被盘中噪音扫出
+            stop, src = floor, f"支撑{_f(sup)}过近,放宽至 -{MIN_STOP_PCT:.1f}% 容错下限"
         if stop < hard:
             stop, src, sup = hard, f"-{dd_pct:.0f}%硬止损(结构支撑{_f(sup)}更深)", sup
     else:
@@ -56,6 +62,35 @@ def structural_stop(ind, chan_res, dd_pct):
     dist = round((close - stop) / close * 100, 1)
     return {"stop": stop, "basis": src, "support_ref": _f(sup),
             "dist_pct": dist, "too_far": dist > dd_pct + 3}
+
+
+def ma_ladder(ind, bias_sell_pct=5.0):
+    """均线阶梯减仓纪律(kb/ma-code-rules.md)—— **信号层,非清仓底线**。
+    短线:破 MA5 减半 → 破 MA10 全减短线仓;波段:破 MA20 中期转弱预警 → 破 MA60 中期离场。
+    另给"偏离 MA5 > bias_sell_pct%"的高抛做 T 位。清仓底线仍归 structural_stop,二者分两层不打架。
+    返回 rungs(从紧到松的减仓阶梯)、broken(现价已跌破的下行线=纪律上已该减到的档)、next(最近未破的下行减仓位)。"""
+    close = ind["close"]
+    bias5 = ind.get("bias5")
+    ma5, ma10, ma20, ma60 = (ind.get(k) for k in ("ma5", "ma10", "ma20", "ma60"))
+    rungs = []
+    if bias5 is not None and bias5 > bias_sell_pct and ma5:  # 高抛做T(短线,向上触发)
+        rungs.append({"line": f"MA5+{bias_sell_pct:.0f}%", "price": round(float(ma5) * (1 + bias_sell_pct / 100), 2),
+                      "dir": "up", "ratio": "1/3", "action": "高抛做T", "tier": "短线",
+                      "why": f"偏离MA5 {bias5}%>{bias_sell_pct:.0f}%,短线高抛"})
+    for price, line, action, ratio, tier, why in [
+        (ma5,  "MA5",  "减半仓",     "1/2",     "短线", "短期走弱(MA5 短期生命线)"),
+        (ma10, "MA10", "全减短线仓", "全减/锁利", "短线", "短线生命线破,锁定利润"),
+        (ma20, "MA20", "波段减仓",   "1/3",     "波段", "中期转弱预警(MA20 中期生命线)"),
+        (ma60, "MA60", "中期离场",   "清",       "波段", "中期走坏(跌破 MA60)"),
+    ]:
+        if price:
+            rungs.append({"line": line, "price": round(float(price), 2), "dir": "down",
+                          "ratio": ratio, "action": action, "tier": tier, "why": why})
+    down = [r for r in rungs if r["dir"] == "down"]
+    broken = [r["line"] for r in down if close < r["price"]]
+    intact = [r for r in down if close >= r["price"]]
+    nxt = max(intact, key=lambda r: r["price"]) if intact else None
+    return {"rungs": rungs, "broken": broken, "next": nxt}
 
 
 def risk_reward(close, stop, target):
