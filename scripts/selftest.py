@@ -143,15 +143,15 @@ _ind_lv = {"alignment": "空头排列", "close": 8.0, "vol_ratio": 2.0, "pct_chg
            "support": 7.8, "pressure": 9.0}
 _bars_lv = [{"o": 8, "c": 8, "l": 7.9, "h": 8.1} for _ in range(60)]
 _sig_lv = _rev.reversal_signals(_ind_lv, _bars_lv, None)
-# 底背离 + 低位量增 双共振 → 反转候选
-_cand = _rev.is_reversal_candidate(_ind_lv, _bars_lv, {"divergence": {"bs": "1B"}}, min_signals=2)
-# 单信号不成候选
-_cand_one = _rev.is_reversal_candidate(_ind_lv, _bars_lv, None, min_signals=2)
+# 分级:底背离(强信号)单独即成反转候选
+_cand_strong = _rev.is_reversal_candidate(_ind_lv, _bars_lv, {"divergence": {"bs": "1B"}})
+# 弱信号(低位量增)单独不成候选
+_cand_weak = _rev.is_reversal_candidate(_ind_lv, _bars_lv, None)
 checks += [
     ("reversal 向上跳空识别", bool(_gap_up) and _gap_up["dir"] == "up"),
     ("reversal 低位量增命中", "低位量增" in _sig_lv),
-    ("reversal ≥2共振成反转候选", bool(_cand) and _cand["n"] >= 2 and "底背离" in _cand["signals"]),
-    ("reversal 单信号不成候选", _cand_one is None),
+    ("reversal 强信号(底背离)单独成候选", bool(_cand_strong) and "底背离" in _cand_strong["strong"]),
+    ("reversal 单弱信号不成候选", _cand_weak is None),
 ]
 # ── 信号有效性回测(signal_backtest.backtest_bars):V形序列前向收益+胜率+末端剔除 ──
 import signal_backtest as _sbt  # noqa: E402

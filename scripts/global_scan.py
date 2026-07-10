@@ -268,12 +268,12 @@ def main() -> None:
                                             shadow=True, extra={"rps": rps, "zt60": zt,
                                             "accumulating": ff["accumulating"], "stabil_signal": sig,
                                             "factors": {"fund": ff} if ff.get("note") else {}}))
-            # ③ 反转候选(第三路,shadow):趋势/超跌都没收 + ≥2 反转信号共振 + 评分≥40。
-            #    收口 scoring 追涨盲区(底背离/低位量增/突破缺口/强支撑),便宜信号先筛、命中才算 chan。
+            # ③ 反转候选(第三路,shadow):趋势/超跌都没收 + 评分≥40 + 分级共振(强信号≥1 或 任意≥2)。
+            #    收口 scoring 追涨盲区(底背离/低位量增/突破缺口/强支撑)。chan 纯CPU很快(K线已拉),直接算,
+            #    不做便宜信号预门——否则只有底背离(需chan)的股会被挡在算 chan 之前而永远漏掉。
             already_os = bool(oversold) and oversold[-1]["code"] == code
-            if not already_os and sc["total"] >= 40 and reversal.reversal_signals(ind, bars, None):
-                res_r = chan.analyze(bars)
-                cand_r = reversal.is_reversal_candidate(ind, bars, res_r, min_signals=2)
+            if not already_os and sc["total"] >= 40:
+                cand_r = reversal.is_reversal_candidate(ind, bars, chan.analyze(bars))
                 if cand_r:
                     sup_r = ind.get("support") or close * 0.95
                     stop_r = round(min(sup_r * 0.98, close * (1 - dd / 100)), 2)

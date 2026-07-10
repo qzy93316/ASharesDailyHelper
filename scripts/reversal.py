@@ -84,11 +84,17 @@ def reversal_signals(ind: dict, bars: list[dict], chan_res: dict | None = None) 
     return sigs
 
 
-def is_reversal_candidate(ind: dict, bars: list[dict], chan_res: dict | None = None,
-                          min_signals: int = 2) -> dict | None:
-    """≥min_signals 共振则为反转候选。返回 {signals, n, entry, note} 或 None。"""
+# 强信号:单独成立即可作反转候选(底背离=缠论1B左侧底、突破缺口=缺口理论真突破,均高确信)。
+# 弱信号(低位量增/强支撑反弹)需 ≥2 共振降噪。(2026-07-10 诊断:跌幅最深39只中 ≥2 共振为0,
+#  纯 ≥2 门槛实盘几乎不触发,故改分级。)
+STRONG_SIGNALS = ("底背离", "突破缺口")
+
+
+def is_reversal_candidate(ind: dict, bars: list[dict], chan_res: dict | None = None) -> dict | None:
+    """分级共振:强信号命中≥1,或任意信号≥2 → 反转候选。返回 {signals, n, strong, note} 或 None。"""
     sigs = reversal_signals(ind, bars, chan_res)
-    if len(sigs) < min_signals:
+    strong = [s for s in sigs if s in STRONG_SIGNALS]
+    if not strong and len(sigs) < 2:
         return None
-    return {"signals": sigs, "n": len(sigs),
+    return {"signals": sigs, "n": len(sigs), "strong": strong,
             "note": "反转共振:" + "、".join(sigs) + "(左侧候选,轻仓试,破支撑走)"}
