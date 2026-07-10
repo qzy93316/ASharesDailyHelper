@@ -223,13 +223,19 @@ CHART_TMPL = """<!doctype html><html><head><meta charset="utf-8">
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 <style>body{{margin:0;background:#0d1420;color:#d5dced;font:14px "Microsoft YaHei",sans-serif}}
 h2{{padding:10px 16px;margin:0}} .g{{display:flex;flex-wrap:wrap}}
-.c{{width:480px;height:300px;margin:8px}} .hd{{padding:4px 12px;color:#9fb0cc}}
+.c{{width:480px;height:300px}} .card{{position:relative;margin:8px}}
+.card.big .c{{width:960px;height:600px}} .hd{{padding:4px 12px;color:#9fb0cc}}
+.mx{{position:absolute;right:6px;top:4px;z-index:6;cursor:pointer;color:#9fb0cc;background:#1b2536;border:1px solid #25324a;border-radius:3px;padding:0 7px;font-size:15px;line-height:20px;user-select:none}}
+.mx:hover{{color:#fff;border-color:#4c8dff}}
 .up{{color:#f6465d}}.down{{color:#2ebd85}} .al{{padding:2px 12px;color:#f0b429}}</style></head>
 <body><h2>🖥️ 盘中监控 · {date} <span class="hd">更新 {updated}(每{refresh}秒自刷新)· 研究提醒,非喊单</span></h2>
 <div class="al">{alerts}</div><div class="g" id="g"></div>
 <script>var D={data};
-D.forEach(function(s){{var el=document.createElement('div');el.className='c';el.id='c_'+s.code;
-document.getElementById('g').appendChild(el);var ch=echarts.init(el);
+D.forEach(function(s){{var card=document.createElement('div');card.className='card';
+var btn=document.createElement('div');btn.className='mx';btn.textContent='⤢';btn.title='放大/还原';
+var el=document.createElement('div');el.className='c';el.id='c_'+s.code;
+card.appendChild(btn);card.appendChild(el);document.getElementById('g').appendChild(card);
+var ch=echarts.init(el);btn.onclick=function(){{card.classList.toggle('big');ch.resize();}};
 var T=s.series.map(function(p){{return p.t;}});
 var lvl=s.levels.map(function(l){{return {{yAxis:l.price,label:{{formatter:l.type+l.price,color:'#f0b429',position:'insideEndTop',fontSize:9}},lineStyle:{{color:'#f0b429',type:'dashed'}}}};}});
 var refs=[];
@@ -242,16 +248,16 @@ var lo=Math.min.apply(null,pv),hi=Math.max.apply(null,pv);
 [s.ma5,s.ma10,s.prev_close].forEach(function(v){{if(v!=null){{lo=Math.min(lo,v);hi=Math.max(hi,v);}}}});
 var pad=(hi-lo)*0.06||hi*0.01||1;lo=+(lo-pad).toFixed(2);hi=+(hi+pad).toFixed(2);
 // 金叉(现价上穿均价,红▲)/死叉(下穿,绿▼)高亮
-var xp=s.crosses.map(function(c){{return {{coord:[c.t,c.p],value:c.kind,symbol:'triangle',symbolRotate:c.kind==='金叉'?0:180,symbolSize:9,itemStyle:{{color:c.kind==='金叉'?'#f6465d':'#2ebd85'}},label:{{show:false}}}};}});
+var xp=s.crosses.map(function(c){{return {{coord:[c.t,c.p],value:c.kind,symbol:'triangle',symbolRotate:c.kind==='金叉'?0:180,symbolSize:9,itemStyle:{{color:c.kind==='金叉'?'#f6465d':'#2ebd85'}},label:{{show:false}},emphasis:{{label:{{show:true,formatter:c.kind+' '+c.t+' '+c.p,position:'top',color:'#fff',fontSize:10,backgroundColor:'#1b2536',borderColor:'#25324a',borderWidth:1,padding:[2,4]}}}}}};}});
 ch.setOption({{title:{{text:s.name+' '+s.code+'  '+(s.price||'-')+'  '+(s.pct>=0?'+':'')+(s.pct||0)+'%',textStyle:{{color:s.pct>=0?'#f6465d':'#2ebd85',fontSize:13}}}},
-legend:{{data:['现价','均价'],right:10,top:4,itemWidth:14,itemHeight:8,textStyle:{{color:'#9fb0cc',fontSize:10}}}},
+legend:{{data:['现价','均价'],right:40,top:4,itemWidth:14,itemHeight:8,textStyle:{{color:'#9fb0cc',fontSize:10}}}},
 tooltip:{{trigger:'axis',axisPointer:{{link:[{{xAxisIndex:'all'}}]}},backgroundColor:'#1b2536',borderColor:'#25324a',textStyle:{{color:'#d5dced'}}}},
 axisPointer:{{link:[{{xAxisIndex:'all'}}]}},
-grid:[{{left:48,right:12,top:28,height:150}},{{left:48,right:12,top:200,height:64}}],
+grid:[{{left:50,right:14,top:'12%',height:'48%'}},{{left:50,right:14,top:'71%',height:'19%'}}],
 xAxis:[{{type:'category',gridIndex:0,data:T,boundaryGap:false,axisLabel:{{show:false}},axisLine:{{lineStyle:{{color:'#25324a'}}}}}},
 {{type:'category',gridIndex:1,data:T,axisLabel:{{color:'#7a869c',fontSize:10}},axisLine:{{lineStyle:{{color:'#25324a'}}}}}}],
 yAxis:[{{scale:true,gridIndex:0,min:lo,max:hi,axisLabel:{{color:'#7a869c'}},splitLine:{{lineStyle:{{color:'#25324a'}}}}}},
-{{scale:true,gridIndex:1,splitNumber:2,name:'量(手)',nameTextStyle:{{color:'#7a869c',fontSize:10}},axisLabel:{{color:'#7a869c',fontSize:10}},splitLine:{{show:false}}}}],
+{{scale:true,gridIndex:1,splitNumber:2,axisLabel:{{color:'#7a869c',fontSize:10,formatter:function(v){{return v>=10000?(v/10000).toFixed(0)+'万手':v;}}}},splitLine:{{show:false}}}}],
 series:[{{name:'现价',type:'line',xAxisIndex:0,yAxisIndex:0,data:s.series.map(function(p){{return p.p;}}),showSymbol:false,lineStyle:{{color:'#4c8dff'}},markLine:{{symbol:'none',data:lvl.concat(refs)}},markPoint:{{data:xp}}}},
 {{name:'均价',type:'line',xAxisIndex:0,yAxisIndex:0,data:s.series.map(function(p){{return p.a;}}),showSymbol:false,lineStyle:{{color:'#f0cd6a',width:1}}}},
 {{name:'成交量',type:'bar',xAxisIndex:1,yAxisIndex:1,barWidth:'60%',data:s.series.map(function(p){{return {{value:p.v,itemStyle:{{color:p.up?'#f6465d':'#2ebd85'}}}};}})}}]}});}});
