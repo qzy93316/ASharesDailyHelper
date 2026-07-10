@@ -236,6 +236,13 @@ var refs=[];
 if(s.ma5!=null)refs.push({{yAxis:s.ma5,label:{{formatter:'MA5 '+s.ma5,color:'#c586ff',position:'insideStartTop',fontSize:9}},lineStyle:{{color:'#c586ff',width:1}}}});
 if(s.ma10!=null)refs.push({{yAxis:s.ma10,label:{{formatter:'MA10 '+s.ma10,color:'#4ec9b0',position:'insideStartBottom',fontSize:9}},lineStyle:{{color:'#4ec9b0',width:1}}}});
 if(s.prev_close!=null)refs.push({{yAxis:s.prev_close,label:{{formatter:'昨收 '+s.prev_close,color:'#7a869c',position:'insideEndBottom',fontSize:9}},lineStyle:{{color:'#5b6980',type:'dashed',width:1}}}});
+// Y轴范围纳入 MA5/MA10/昨收,避免只按分时价自适应导致参考线被裁出区间(看趋势位置比看分时更重要)
+var pv=s.series.map(function(p){{return p.p;}}).filter(function(v){{return v!=null;}});
+var lo=Math.min.apply(null,pv),hi=Math.max.apply(null,pv);
+[s.ma5,s.ma10,s.prev_close].forEach(function(v){{if(v!=null){{lo=Math.min(lo,v);hi=Math.max(hi,v);}}}});
+var pad=(hi-lo)*0.06||hi*0.01||1;lo=+(lo-pad).toFixed(2);hi=+(hi+pad).toFixed(2);
+// 金叉(现价上穿均价,红▲)/死叉(下穿,绿▼)高亮
+var xp=s.crosses.map(function(c){{return {{coord:[c.t,c.p],value:c.kind,symbol:'triangle',symbolRotate:c.kind==='金叉'?0:180,symbolSize:9,itemStyle:{{color:c.kind==='金叉'?'#f6465d':'#2ebd85'}},label:{{show:false}}}};}});
 ch.setOption({{title:{{text:s.name+' '+s.code+'  '+(s.price||'-')+'  '+(s.pct>=0?'+':'')+(s.pct||0)+'%',textStyle:{{color:s.pct>=0?'#f6465d':'#2ebd85',fontSize:13}}}},
 legend:{{data:['现价','均价'],right:10,top:4,itemWidth:14,itemHeight:8,textStyle:{{color:'#9fb0cc',fontSize:10}}}},
 tooltip:{{trigger:'axis',axisPointer:{{link:[{{xAxisIndex:'all'}}]}},backgroundColor:'#1b2536',borderColor:'#25324a',textStyle:{{color:'#d5dced'}}}},
@@ -243,9 +250,9 @@ axisPointer:{{link:[{{xAxisIndex:'all'}}]}},
 grid:[{{left:48,right:12,top:28,height:150}},{{left:48,right:12,top:200,height:64}}],
 xAxis:[{{type:'category',gridIndex:0,data:T,boundaryGap:false,axisLabel:{{show:false}},axisLine:{{lineStyle:{{color:'#25324a'}}}}}},
 {{type:'category',gridIndex:1,data:T,axisLabel:{{color:'#7a869c',fontSize:10}},axisLine:{{lineStyle:{{color:'#25324a'}}}}}}],
-yAxis:[{{scale:true,gridIndex:0,axisLabel:{{color:'#7a869c'}},splitLine:{{lineStyle:{{color:'#25324a'}}}}}},
+yAxis:[{{scale:true,gridIndex:0,min:lo,max:hi,axisLabel:{{color:'#7a869c'}},splitLine:{{lineStyle:{{color:'#25324a'}}}}}},
 {{scale:true,gridIndex:1,splitNumber:2,name:'量(手)',nameTextStyle:{{color:'#7a869c',fontSize:10}},axisLabel:{{color:'#7a869c',fontSize:10}},splitLine:{{show:false}}}}],
-series:[{{name:'现价',type:'line',xAxisIndex:0,yAxisIndex:0,data:s.series.map(function(p){{return p.p;}}),showSymbol:false,lineStyle:{{color:'#4c8dff'}},markLine:{{symbol:'none',data:lvl.concat(refs)}}}},
+series:[{{name:'现价',type:'line',xAxisIndex:0,yAxisIndex:0,data:s.series.map(function(p){{return p.p;}}),showSymbol:false,lineStyle:{{color:'#4c8dff'}},markLine:{{symbol:'none',data:lvl.concat(refs)}},markPoint:{{data:xp}}}},
 {{name:'均价',type:'line',xAxisIndex:0,yAxisIndex:0,data:s.series.map(function(p){{return p.a;}}),showSymbol:false,lineStyle:{{color:'#f0cd6a',width:1}}}},
 {{name:'成交量',type:'bar',xAxisIndex:1,yAxisIndex:1,barWidth:'60%',data:s.series.map(function(p){{return {{value:p.v,itemStyle:{{color:p.up?'#f6465d':'#2ebd85'}}}};}})}}]}});}});
 </script></body></html>"""
@@ -283,10 +290,20 @@ def write_chart(date: str, series: dict, snaps: dict, wl: list[dict], alerts_log
                 prev_p = p
         # 图上计划价位去掉"📉破MAx"(下面用专门的 MA 参考线画,避免重复),告警逻辑用的 it["levels"] 不动
         chart_levels = [lv for lv in it["levels"] if not lv["type"].startswith("📉破")]
+        # 金叉/死叉:现价上穿分时均价=金叉(偏多),下穿=死叉(偏空)
+        crosses = []
+        for i in range(1, len(ser)):
+            a0, p0, a1, p1 = ser[i - 1]["a"], ser[i - 1]["p"], ser[i]["a"], ser[i]["p"]
+            if None in (a0, p0, a1, p1):
+                continue
+            if p0 - a0 <= 0 < p1 - a1:
+                crosses.append({"t": ser[i]["t"], "p": p1, "kind": "金叉"})
+            elif p0 - a0 >= 0 > p1 - a1:
+                crosses.append({"t": ser[i]["t"], "p": p1, "kind": "死叉"})
         data.append({"code": code, "name": it["name"], "price": s.get("price"),
                      "pct": s.get("pct"), "prev_close": s.get("prev_close"),
                      "ma5": it.get("ma5"), "ma10": it.get("ma10"),
-                     "levels": chart_levels, "series": ser})
+                     "levels": chart_levels, "crosses": crosses, "series": ser})
     html = CHART_TMPL.format(
         date=date, refresh=20, updated=dt.datetime.now().strftime("%H:%M:%S"),
         alerts="　".join(alerts_log[-6:]) or "(暂无告警)",
