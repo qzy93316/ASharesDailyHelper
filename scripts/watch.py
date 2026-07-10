@@ -171,7 +171,17 @@ def build_watchlist(date: str) -> list[dict]:
             add(code, name, pp, "up", "🚀突破", f"突破 {pp} 确认介入")
         if p_.get("target"):
             add(code, name, p_["target"], "up", "🏁目标", f"触及目标 {p_['target']}")
-    return list(items.values())
+    out = list(items.values())
+    # 附当日 MA5/MA10(日级常量、盘中不变),供分时图画参考线辅助研判。K线走缓存(档期新鲜),开机一次。
+    for it in out:
+        try:
+            k = fetcher.get_kline(it["code"], 60)
+            closes = [float(x) for x in k["收盘"]]
+            it["ma5"] = round(sum(closes[-5:]) / 5, 2) if len(closes) >= 5 else None
+            it["ma10"] = round(sum(closes[-10:]) / 10, 2) if len(closes) >= 10 else None
+        except Exception:  # noqa: BLE001
+            it["ma5"] = it["ma10"] = None
+    return out
 
 
 def _in_trading_hours(now: dt.datetime) -> bool:
@@ -221,8 +231,13 @@ h2{{padding:10px 16px;margin:0}} .g{{display:flex;flex-wrap:wrap}}
 D.forEach(function(s){{var el=document.createElement('div');el.className='c';el.id='c_'+s.code;
 document.getElementById('g').appendChild(el);var ch=echarts.init(el);
 var T=s.series.map(function(p){{return p.t;}});
-var lvl=s.levels.map(function(l){{return {{yAxis:l.price,label:{{formatter:l.type+l.price,color:'#f0b429',position:'insideEndTop'}},lineStyle:{{color:'#f0b429',type:'dashed'}}}};}});
+var lvl=s.levels.map(function(l){{return {{yAxis:l.price,label:{{formatter:l.type+l.price,color:'#f0b429',position:'insideEndTop',fontSize:9}},lineStyle:{{color:'#f0b429',type:'dashed'}}}};}});
+var refs=[];
+if(s.ma5!=null)refs.push({{yAxis:s.ma5,label:{{formatter:'MA5 '+s.ma5,color:'#c586ff',position:'insideStartTop',fontSize:9}},lineStyle:{{color:'#c586ff',width:1}}}});
+if(s.ma10!=null)refs.push({{yAxis:s.ma10,label:{{formatter:'MA10 '+s.ma10,color:'#4ec9b0',position:'insideStartBottom',fontSize:9}},lineStyle:{{color:'#4ec9b0',width:1}}}});
+if(s.prev_close!=null)refs.push({{yAxis:s.prev_close,label:{{formatter:'昨收 '+s.prev_close,color:'#7a869c',position:'insideEndBottom',fontSize:9}},lineStyle:{{color:'#5b6980',type:'dashed',width:1}}}});
 ch.setOption({{title:{{text:s.name+' '+s.code+'  '+(s.price||'-')+'  '+(s.pct>=0?'+':'')+(s.pct||0)+'%',textStyle:{{color:s.pct>=0?'#f6465d':'#2ebd85',fontSize:13}}}},
+legend:{{data:['现价','均价'],right:10,top:4,itemWidth:14,itemHeight:8,textStyle:{{color:'#9fb0cc',fontSize:10}}}},
 tooltip:{{trigger:'axis',axisPointer:{{link:[{{xAxisIndex:'all'}}]}},backgroundColor:'#1b2536',borderColor:'#25324a',textStyle:{{color:'#d5dced'}}}},
 axisPointer:{{link:[{{xAxisIndex:'all'}}]}},
 grid:[{{left:48,right:12,top:28,height:150}},{{left:48,right:12,top:200,height:64}}],
@@ -230,7 +245,8 @@ xAxis:[{{type:'category',gridIndex:0,data:T,boundaryGap:false,axisLabel:{{show:f
 {{type:'category',gridIndex:1,data:T,axisLabel:{{color:'#7a869c',fontSize:10}},axisLine:{{lineStyle:{{color:'#25324a'}}}}}}],
 yAxis:[{{scale:true,gridIndex:0,axisLabel:{{color:'#7a869c'}},splitLine:{{lineStyle:{{color:'#25324a'}}}}}},
 {{scale:true,gridIndex:1,splitNumber:2,name:'量(手)',nameTextStyle:{{color:'#7a869c',fontSize:10}},axisLabel:{{color:'#7a869c',fontSize:10}},splitLine:{{show:false}}}}],
-series:[{{name:'现价',type:'line',xAxisIndex:0,yAxisIndex:0,data:s.series.map(function(p){{return p.p;}}),showSymbol:false,lineStyle:{{color:'#4c8dff'}},markLine:{{symbol:'none',data:lvl}}}},
+series:[{{name:'现价',type:'line',xAxisIndex:0,yAxisIndex:0,data:s.series.map(function(p){{return p.p;}}),showSymbol:false,lineStyle:{{color:'#4c8dff'}},markLine:{{symbol:'none',data:lvl.concat(refs)}}}},
+{{name:'均价',type:'line',xAxisIndex:0,yAxisIndex:0,data:s.series.map(function(p){{return p.a;}}),showSymbol:false,lineStyle:{{color:'#f0cd6a',width:1}}}},
 {{name:'成交量',type:'bar',xAxisIndex:1,yAxisIndex:1,barWidth:'60%',data:s.series.map(function(p){{return {{value:p.v,itemStyle:{{color:p.up?'#f6465d':'#2ebd85'}}}};}})}}]}});}});
 </script></body></html>"""
 
@@ -247,19 +263,30 @@ def write_chart(date: str, series: dict, snaps: dict, wl: list[dict], alerts_log
         # 量柱红绿沿用涨跌色:现价 >= 上一分钟现价 记红(涨),否则绿(跌)。
         ser = []
         prev_cvol = prev_p = None
+        cum_pv = cum_v = 0.0
         for pt in raw:
             cvol, p = pt.get("cvol"), pt.get("p")
             vol = 0.0
             if cvol is not None:
                 vol = max(cvol - prev_cvol, 0.0) if prev_cvol is not None else cvol
             up = prev_p is None or (p is not None and p >= prev_p)
-            ser.append({"t": pt["t"], "p": p, "v": round(vol, 1), "up": 1 if up else 0})
+            # 分时均价线(同花顺黄线,VWAP 近似):累计(分钟价×分钟量)/累计量;首分钟或零量退化为现价
+            avg = p
+            if p is not None:
+                cum_pv += p * vol
+                cum_v += vol
+                avg = round(cum_pv / cum_v, 2) if cum_v > 0 else p
+            ser.append({"t": pt["t"], "p": p, "v": round(vol, 1), "up": 1 if up else 0, "a": avg})
             if cvol is not None:
                 prev_cvol = cvol
             if p is not None:
                 prev_p = p
+        # 图上计划价位去掉"📉破MAx"(下面用专门的 MA 参考线画,避免重复),告警逻辑用的 it["levels"] 不动
+        chart_levels = [lv for lv in it["levels"] if not lv["type"].startswith("📉破")]
         data.append({"code": code, "name": it["name"], "price": s.get("price"),
-                     "pct": s.get("pct"), "levels": it["levels"], "series": ser})
+                     "pct": s.get("pct"), "prev_close": s.get("prev_close"),
+                     "ma5": it.get("ma5"), "ma10": it.get("ma10"),
+                     "levels": chart_levels, "series": ser})
     html = CHART_TMPL.format(
         date=date, refresh=20, updated=dt.datetime.now().strftime("%H:%M:%S"),
         alerts="　".join(alerts_log[-6:]) or "(暂无告警)",
